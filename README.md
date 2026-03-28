@@ -73,3 +73,59 @@ Or, for interactive mode (recommended):
   git remote add deploy <bare_repo_url>
   git push deploy main
   ```
+
+
+# Common usage patterns
+
+
+## PUSH: Sync Local Repo to Remote
+
+To push (sync) your local repository to the remote server:
+
+1. Make sure you have added the remote (if not already):
+  ```sh
+  git remote add deploy <bare_repo_url>
+  # Or update if it already exists:
+  git remote set-url deploy <bare_repo_url>
+  ```
+2. Push your local branch to the remote:
+  ```sh
+  git push deploy main  # or your branch name
+  ```
+3. (Optional) Use the deploy tool to automate setup and push:
+  ```sh
+  ./dist/deploy --repo-path . --host <remote_host> --username <user> --key <path_to_ssh_key> --deploy-path /var/repos
+  ```
+
+This will sync your local changes to the remote bare repository and update the working directory on the server.
+
+4. (Final Step) On the remote server, make sure the working directory is updated to the latest version:
+   - SSH into your remote server:
+     ```sh
+     ssh <user>@<remote_host>
+     cd <working_directory_path>
+     git fetch origin
+     git checkout main  # or your branch name
+     git pull origin main  # or your branch name
+     ```
+   - If the checkout or pull fails, check the error message and resolve any issues (e.g., missing branch, permissions, or repo not initialized). Report the error if you cannot resolve it.
+```
+
+
+## PULL: Sync Remote Repo to Local
+
+To pull (sync) changes from the remote server to your local repository:
+
+1. Make sure the remote is set up:
+  ```sh
+  git remote add deploy <bare_repo_url>
+  # Or update if it already exists:
+  git remote set-url deploy <bare_repo_url>
+  ```
+2. Pull the latest changes from the remote:
+  ```sh
+  git pull deploy main  # or your branch name
+  ```
+
+This will fetch and merge changes from the remote bare repository to your local branch.
+```

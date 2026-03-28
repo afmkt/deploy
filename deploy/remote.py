@@ -78,12 +78,13 @@ class RemoteServer:
             console.print(f"[red]✗ Failed to initialize bare repository: {stderr}[/red]")
             return False
 
-    def clone_or_update_working_dir(self, bare_repo_path: str, working_dir_path: str) -> bool:
+    def clone_or_update_working_dir(self, bare_repo_path: str, working_dir_path: str, branch: str = "main") -> bool:
         """Clone or update working directory from bare repository.
 
         Args:
             bare_repo_path: Path to the bare repository
             working_dir_path: Path to the working directory
+            branch: Branch name to checkout (default: main)
 
         Returns:
             True if successful, False otherwise
@@ -92,8 +93,23 @@ class RemoteServer:
         if self.directory_exists(working_dir_path):
             # Update existing working directory
             console.print(f"[blue]Updating working directory: {working_dir_path}[/blue]")
+            
+            # Checkout the specified branch
             exit_code, stdout, stderr = self.ssh.execute(
-                f"cd {working_dir_path} && git pull"
+                f"cd {working_dir_path} && git checkout {branch}"
+            )
+            if exit_code != 0:
+                # Try to create the branch if it doesn't exist
+                exit_code, stdout, stderr = self.ssh.execute(
+                    f"cd {working_dir_path} && git checkout -b {branch}"
+                )
+                if exit_code != 0:
+                    console.print(f"[red]✗ Failed to checkout branch {branch}: {stderr}[/red]")
+                    return False
+            
+            # Pull from the specified branch
+            exit_code, stdout, stderr = self.ssh.execute(
+                f"cd {working_dir_path} && git pull origin {branch}"
             )
             if exit_code == 0:
                 console.print(f"[green]✓ Updated working directory[/green]")
@@ -105,7 +121,7 @@ class RemoteServer:
             # Clone from bare repository
             console.print(f"[blue]Cloning working directory: {working_dir_path}[/blue]")
             exit_code, stdout, stderr = self.ssh.execute(
-                f"git clone {bare_repo_path} {working_dir_path}"
+                f"git clone -b {branch} {bare_repo_path} {working_dir_path}"
             )
             if exit_code == 0:
                 console.print(f"[green]✓ Cloned working directory[/green]")
@@ -136,11 +152,77 @@ class RemoteServer:
         """
         return f"{self.deploy_path}/{repo_name}"
 
-    def setup_deployment(self, repo_name: str) -> tuple[bool, str]:
+    def commit_remote_changes(self, working_dir_path: str, message: str = "Update from remote") -> bool:
+        """Commit changes in the remote working directory.
+
+        Args:
+            working_dir_path: Path to the working directory on remote server
+            message: Commit message
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Check if working directory exists
+        if not self.directory_exists(working_dir_path):
+            console.print(f"[red]✗ Working directory does not exist: {working_dir_path}[/red]")
+            return False
+
+        # Check if there are changes to commit
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"cd {working_dir_path} && git status --porcelain"
+        )
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to check git status: {stderr}[/red]")
+            return False
+
+        if not stdout.strip():
+            console.print(f"[yellow]No changes to commit in remote working directory[/yellow]")
+            return True
+
+        # Add all changes and commit
+        console.print(f"[blue]Committing changes in remote working directory...[/blue]")
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"cd {working_dir_path} && git add -A && git commit -m '{message}'"
+        )
+        if exit_code == 0:
+            console.print(f"[green]✓ Committed changes in remote working directory[/green]")
+            return True
+        else:
+            console.print(f"[red]✗ Failed to commit changes: {stderr}[/red]")
+            return False
+
+    def push_to_bare_repo(self, working_dir_path: str) -> bool:
+        """Push changes from working directory to bare repository.
+
+        Args:
+            working_dir_path: Path to the working directory on remote server
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Check if working directory exists
+        if not self.directory_exists(working_dir_path):
+            console.print(f"[red]✗ Working directory does not exist: {working_dir_path}[/red]")
+            return False
+
+        # Push to origin (bare repository)
+        console.print(f"[blue]Pushing changes to bare repository...[/blue]")
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"cd {working_dir_path} && git push origin HEAD"
+        )
+        if exit_code == 0:
+            console.print(f"[green]✓ Pushed changes to bare repository[/green]")
+            return True
+        else:
+            console.print(f"[red]✗ Failed to push to bare repository: {stderr}[/red]")
+            return False
+
+    def setup_deployment(self, repo_name: str, branch: str = "main") -> tuple[bool, str]:
         """Setup deployment for a repository.
 
         Args:
             repo_name: Repository name
+            branch: Branch name to checkout (default: main)
 
         Returns:
             Tuple of (success, bare_repo_url)
@@ -156,7 +238,7 @@ class RemoteServer:
 
         # Setup working directory
         working_dir_path = self.get_working_dir_path(repo_name)
-        if not self.clone_or_update_working_dir(bare_repo_path, working_dir_path):
+        if not self.clone_or_update_working_dir(bare_repo_path, working_dir_path, branch):
             return False, ""
 
         # Generate SSH URL for the bare repository

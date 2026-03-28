@@ -161,3 +161,64 @@ class GitRepository:
 
         console.print(f"[green]✓ Valid Git repository: {self.path}[/green]")
         return True
+
+    def pull(self, remote: str = "origin", branch: str = "main") -> bool:
+        """Pull from remote repository.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch name (default: main)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Get current branch
+            current_branch = self.get_current_branch()
+            if current_branch:
+                branch = current_branch
+
+            console.print(f"[blue]Pulling from {remote}/{branch}...[/blue]")
+            subprocess.run(
+                ["git", "pull", remote, branch],
+                cwd=self.path,
+                check=True
+            )
+            console.print(f"[green]✓ Pulled from {remote}/{branch}[/green]")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]✗ Pull failed: {e}[/red]")
+            return False
+
+    def checkout_branch(self, branch_name: str, create: bool = False) -> bool:
+        """Checkout a branch.
+
+        Args:
+            branch_name: Name of the branch to checkout
+            create: Whether to create the branch if it doesn't exist
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if create:
+                console.print(f"[blue]Creating and checking out branch: {branch_name}[/blue]")
+                subprocess.run(
+                    ["git", "checkout", "-b", branch_name],
+                    cwd=self.path,
+                    check=True
+                )
+            else:
+                console.print(f"[blue]Checking out branch: {branch_name}[/blue]")
+                subprocess.run(
+                    ["git", "checkout", branch_name],
+                    cwd=self.path,
+                    check=True
+                )
+            console.print(f"[green]✓ Checked out branch: {branch_name}[/green]")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]✗ Failed to checkout branch: {e}[/red]")
+            return False

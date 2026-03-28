@@ -178,13 +178,21 @@ class GitRepository:
             if current_branch:
                 branch = current_branch
 
-            console.print(f"[blue]Pulling from {remote}/{branch}...[/blue]")
+            console.print(f"[blue]Fetching from {remote}...[/blue]")
             subprocess.run(
-                ["git", "pull", remote, branch],
+                ["git", "fetch", remote],
                 cwd=self.path,
                 check=True
             )
-            console.print(f"[green]✓ Pulled from {remote}/{branch}[/green]")
+            console.print(f"[green]✓ Fetched from {remote}[/green]")
+            
+            console.print(f"[blue]Merging {remote}/{branch}...[/blue]")
+            subprocess.run(
+                ["git", "merge", f"{remote}/{branch}"],
+                cwd=self.path,
+                check=True
+            )
+            console.print(f"[green]✓ Merged {remote}/{branch}[/green]")
             return True
 
         except subprocess.CalledProcessError as e:

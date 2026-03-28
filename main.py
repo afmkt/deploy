@@ -217,13 +217,25 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                 console.print(f"[red]✗ Failed to check git status: {stderr}[/red]")
                 sys.exit(1)
             
-            if stdout.strip():
-                console.print("[yellow]Remote working directory has uncommitted changes[/yellow]")
-                # Commit changes
-                console.print("\n[bold]Step 5: Committing changes in remote working directory[/bold]")
-                if not remote.commit_remote_changes(working_dir_path):
-                    console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
-                    sys.exit(1)
+            has_uncommitted = bool(stdout.strip())
+            
+            # Check if there are unpushed commits
+            exit_code, stdout, stderr = ssh.execute(
+                f"cd {working_dir_path} && git log origin/$(git rev-parse --abbrev-ref HEAD)..HEAD --oneline 2>/dev/null || echo ''"
+            )
+            has_unpushed = bool(stdout.strip()) if exit_code == 0 else False
+            
+            if has_uncommitted or has_unpushed:
+                if has_uncommitted:
+                    console.print("[yellow]Remote working directory has uncommitted changes[/yellow]")
+                    # Commit changes
+                    console.print("\n[bold]Step 5: Committing changes in remote working directory[/bold]")
+                    if not remote.commit_remote_changes(working_dir_path):
+                        console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
+                        sys.exit(1)
+                
+                if has_unpushed:
+                    console.print("[yellow]Remote working directory has unpushed commits[/yellow]")
                 
                 # Push changes to bare repository
                 console.print("\n[bold]Step 6: Pushing changes to bare repository[/bold]")
@@ -231,7 +243,7 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                     console.print("[red]✗ Failed to push changes to bare repository[/red]")
                     sys.exit(1)
             else:
-                console.print("[green]✓ Remote working directory is clean[/green]")
+                console.print("[green]✓ Remote working directory is clean and up to date[/green]")
         
         # Optional: Commit changes in remote working directory (without sync check)
         elif commit:

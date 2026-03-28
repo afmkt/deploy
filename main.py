@@ -135,10 +135,11 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--commit/--no-commit", default=False, help="Commit changes in remote working directory")
 @click.option("--pull/--no-pull", default=False, help="Pull from remote to local repository")
+@click.option("--sync-remote/--no-sync-remote", default=False, help="Check if remote working dir is clean, commit changes, push to bare repo, then pull")
 @click.option("--branch", "-b", help="Branch name to pull to (only used with --pull)")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
-         pull: bool, branch: str):
+         pull: bool, sync_remote: bool, branch: str):
     """Pull from remote repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
@@ -205,8 +206,35 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
             console.print(f"[red]✗ Remote repository does not exist: {bare_repo_path}[/red]")
             sys.exit(1)
 
-        # Optional: Commit changes in remote working directory
-        if commit:
+        # Optional: Sync remote working directory (check clean, commit, push, then pull)
+        if sync_remote:
+            console.print("\n[bold]Step 4: Checking if remote working directory is clean[/bold]")
+            # Check if there are uncommitted changes
+            exit_code, stdout, stderr = ssh.execute(
+                f"cd {working_dir_path} && git status --porcelain"
+            )
+            if exit_code != 0:
+                console.print(f"[red]✗ Failed to check git status: {stderr}[/red]")
+                sys.exit(1)
+            
+            if stdout.strip():
+                console.print("[yellow]Remote working directory has uncommitted changes[/yellow]")
+                # Commit changes
+                console.print("\n[bold]Step 5: Committing changes in remote working directory[/bold]")
+                if not remote.commit_remote_changes(working_dir_path):
+                    console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
+                    sys.exit(1)
+                
+                # Push changes to bare repository
+                console.print("\n[bold]Step 6: Pushing changes to bare repository[/bold]")
+                if not remote.push_to_bare_repo(working_dir_path):
+                    console.print("[red]✗ Failed to push changes to bare repository[/red]")
+                    sys.exit(1)
+            else:
+                console.print("[green]✓ Remote working directory is clean[/green]")
+        
+        # Optional: Commit changes in remote working directory (without sync check)
+        elif commit:
             console.print("\n[bold]Step 4: Committing changes in remote working directory[/bold]")
             if not remote.commit_remote_changes(working_dir_path):
                 console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
@@ -220,7 +248,8 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
 
         # Optional: Pull from remote to local
         if pull:
-            console.print("\n[bold]Step 6: Pulling from remote to local[/bold]")
+            step_num = 7 if sync_remote else 6
+            console.print(f"\n[bold]Step {step_num}: Pulling from remote to local[/bold]")
             # Add remote if not exists
             remote_name = "deploy"
             bare_repo_url = f"ssh://{username}@{host}:{port}{bare_repo_path}"

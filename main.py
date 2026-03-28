@@ -138,7 +138,7 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--branch", "-b", help="Branch name to pull to (only used with --pull)")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
-         pull_flag: bool, branch: str):
+         pull: bool, branch: str):
     """Pull from remote repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
@@ -219,7 +219,7 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                 sys.exit(1)
 
         # Optional: Pull from remote to local
-        if pull_flag:
+        if pull:
             console.print("\n[bold]Step 6: Pulling from remote to local[/bold]")
             # Add remote if not exists
             remote_name = "deploy"

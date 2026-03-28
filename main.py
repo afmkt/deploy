@@ -29,8 +29,9 @@ console = Console()
 @click.option("--deploy-path", "-d", default="/var/repos", help="Deploy path on remote server")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
+@click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual push")
 def main(repo_path: str, host: str, port: int, username: str, key: str,
-         password: str, deploy_path: str, interactive: bool, use_config: bool):
+         password: str, deploy_path: str, interactive: bool, use_config: bool, dry_run: bool):
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH.
 
     This tool automates repository setup, remote configuration, and deployment
@@ -119,6 +120,11 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
     if not ssh.connect():
         sys.exit(1)
 
+    if dry_run:
+        console.print("\n[green]✓ Dry run completed successfully - connection and arguments are valid[/green]")
+        ssh.disconnect()
+        return
+
     try:
         # Setup remote deployment
         console.print("\n[bold]Step 4: Setting up remote deployment[/bold]")
@@ -169,13 +175,13 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--deploy-path", "-d", default="/var/repos", help="Deploy path on remote server")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--commit/--no-commit", default=False, help="Commit changes in remote working directory")
-@click.option("--pull/--no-pull", default=False, help="Pull from remote to local repository")
 @click.option("--sync-remote/--no-sync-remote", default=False, help="Check if remote working dir is clean, commit changes, push to bare repo, then pull")
-@click.option("--branch", "-b", help="Branch name to pull to (only used with --pull)")
+@click.option("--branch", "-b", help="Branch name to pull to")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
+@click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual pull")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
-         pull: bool, sync_remote: bool, branch: str, use_config: bool):
+         sync_remote: bool, branch: str, use_config: bool, dry_run: bool):
     """Pull from remote repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
@@ -263,6 +269,11 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
     if not ssh.connect():
         sys.exit(1)
 
+    if dry_run:
+        console.print("\n[green]✓ Dry run completed successfully - connection and arguments are valid[/green]")
+        ssh.disconnect()
+        return
+
     try:
         # Get remote paths
         remote = RemoteServer(ssh, deploy_path)
@@ -326,27 +337,26 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                 console.print("[red]✗ Failed to push changes to bare repository[/red]")
                 sys.exit(1)
 
-        # Optional: Pull from remote to local
-        if pull:
-            step_num = 7 if sync_remote else 6
-            console.print(f"\n[bold]Step {step_num}: Pulling from remote to local[/bold]")
-            # Add remote if not exists
-            remote_name = "deploy"
-            bare_repo_url = f"ssh://{username}@{host}:{port}{bare_repo_path}"
-            if not repo.add_remote(remote_name, bare_repo_url):
-                console.print("[red]✗ Failed to add remote[/red]")
+        # Pull from remote to local (default action)
+        step_num = 7 if sync_remote else 6
+        console.print(f"\n[bold]Step {step_num}: Pulling from remote to local[/bold]")
+        # Add remote if not exists
+        remote_name = "deploy"
+        bare_repo_url = f"ssh://{username}@{host}:{port}{bare_repo_path}"
+        if not repo.add_remote(remote_name, bare_repo_url):
+            console.print("[red]✗ Failed to add remote[/red]")
+            sys.exit(1)
+
+        # Checkout branch if specified
+        if branch:
+            if not repo.checkout_branch(branch, create=True):
+                console.print(f"[red]✗ Failed to checkout branch: {branch}[/red]")
                 sys.exit(1)
 
-            # Checkout branch if specified
-            if branch:
-                if not repo.checkout_branch(branch, create=True):
-                    console.print(f"[red]✗ Failed to checkout branch: {branch}[/red]")
-                    sys.exit(1)
-
-            # Pull from remote
-            if not repo.pull(remote_name):
-                console.print("[red]✗ Failed to pull from remote[/red]")
-                sys.exit(1)
+        # Pull from remote
+        if not repo.pull(remote_name):
+            console.print("[red]✗ Failed to pull from remote[/red]")
+            sys.exit(1)
 
         console.print("\n[green]✓ Pull operation completed successfully[/green]")
 

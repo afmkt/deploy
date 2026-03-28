@@ -60,6 +60,7 @@ Or, for interactive mode (recommended):
 - `--deploy-path` : Path on remote server for deployment (default: /var/repos)
 - `--interactive/--no-interactive` : Enable/disable interactive prompts (default: interactive)
 - `--use-config/--no-use-config` : Load arguments from saved config file (default: no)
+- `--dry-run`     : Validate connection and arguments without performing actual push/pull
 
 #### Example
 
@@ -117,18 +118,43 @@ This will sync your local changes to the remote bare repository and update the w
 
 To pull (sync) changes from the remote server to your local repository:
 
-1. Make sure the remote is set up:
-  ```sh
-  git remote add deploy <bare_repo_url>
-  # Or update if it already exists:
-  git remote set-url deploy <bare_repo_url>
-  ```
-2. Pull the latest changes from the remote:
-  ```sh
-  git pull deploy main  # or your branch name
-  ```
+```sh
+./dist/deploy pull --repo-path . --host <remote_host> --username <user> --key <path_to_ssh_key> --deploy-path /var/repos
+```
 
-This will fetch and merge changes from the remote bare repository to your local branch.
+Or, for interactive mode (recommended):
+
+```sh
+./dist/deploy pull
+```
+
+The pull command will:
+1. Validate the local repository
+2. Connect to the remote server
+3. Check if the bare repository exists
+4. Pull changes from the remote bare repository to your local repository
+
+### Optional Enhancements
+
+- `--commit` : Commit changes in remote working directory before pulling
+- `--sync-remote` : Check if remote working dir is clean, commit changes, push to bare repo, then pull
+- `--branch` : Specify branch name to pull to
+- `--dry-run` : Validate connection and arguments without performing actual pull
+
+### Example with Options
+
+```sh
+# Sync remote working directory and then pull
+./dist/deploy pull --sync-remote
+
+# Commit remote changes and then pull
+./dist/deploy pull --commit
+
+# Pull to a specific branch
+./dist/deploy pull --branch feature-branch
+
+# Dry run to validate connection
+./dist/deploy pull --dry-run
 ```
 
 ## Configuration Management

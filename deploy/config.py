@@ -9,16 +9,23 @@ from typing import Any, Dict, Optional
 class DeployConfig:
     """Manages deployment configuration and saves latest arguments."""
 
-    CONFIG_DIR = Path.cwd() / ".deploy"
-    CONFIG_FILE = CONFIG_DIR / "config.json"
-
-    def __init__(self):
-        """Initialize the config manager."""
+    def __init__(self, config_dir: Optional[Path] = None):
+        """Initialize the config manager.
+        
+        Args:
+            config_dir: Optional custom config directory. If not provided,
+                       uses .deploy in the current working directory.
+        """
+        if config_dir is not None:
+            self._config_dir = config_dir
+        else:
+            self._config_dir = Path.cwd() / ".deploy"
+        self._config_file = self._config_dir / "config.json"
         self._ensure_config_dir()
 
     def _ensure_config_dir(self):
         """Ensure the config directory exists."""
-        self.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self._config_dir.mkdir(parents=True, exist_ok=True)
 
     def save_args(self, args: Dict[str, Any], command: str = "push"):
         """Save the latest arguments to config file.
@@ -38,7 +45,7 @@ class DeployConfig:
         config[command] = filtered_args
         
         try:
-            with open(self.CONFIG_FILE, "w") as f:
+            with open(self._config_file, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception as e:
             # Silently fail if we can't save config
@@ -50,11 +57,11 @@ class DeployConfig:
         Returns:
             Dictionary containing all saved configurations
         """
-        if not self.CONFIG_FILE.exists():
+        if not self._config_file.exists():
             return {}
         
         try:
-            with open(self.CONFIG_FILE, "r") as f:
+            with open(self._config_file, "r") as f:
                 return json.load(f)
         except (json.JSONDecodeError, Exception):
             return {}
@@ -77,7 +84,7 @@ class DeployConfig:
         Returns:
             Path to the config file
         """
-        return self.CONFIG_FILE
+        return self._config_file
 
     def clear_config(self, command: Optional[str] = None):
         """Clear saved configuration.
@@ -91,13 +98,13 @@ class DeployConfig:
             if command in config:
                 del config[command]
                 try:
-                    with open(self.CONFIG_FILE, "w") as f:
+                    with open(self._config_file, "w") as f:
                         json.dump(config, f, indent=2)
                 except Exception:
                     pass
         else:
             try:
-                if self.CONFIG_FILE.exists():
-                    self.CONFIG_FILE.unlink()
+                if self._config_file.exists():
+                    self._config_file.unlink()
             except Exception:
                 pass

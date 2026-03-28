@@ -4,10 +4,12 @@ import sys
 import click
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from deploy.git import GitRepository
 from deploy.ssh import SSHConnection
 from deploy.remote import RemoteServer
+from deploy.config import DeployConfig
 from deploy.utils import (
     prompt_connection_details,
     prompt_deploy_path,
@@ -26,8 +28,9 @@ console = Console()
 @click.option("--password", help="SSH password (not recommended, use key instead)")
 @click.option("--deploy-path", "-d", default="/var/repos", help="Deploy path on remote server")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
+@click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 def main(repo_path: str, host: str, port: int, username: str, key: str,
-         password: str, deploy_path: str, interactive: bool):
+         password: str, deploy_path: str, interactive: bool, use_config: bool):
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH.
 
     This tool automates repository setup, remote configuration, and deployment
@@ -39,6 +42,26 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
         "Sync local Git repository to remote server over SSH",
         border_style="blue"
     ))
+
+    # Load from config if requested
+    config = DeployConfig()
+    if use_config:
+        saved_args = config.load_args("push")
+        if saved_args:
+            console.print("[dim]Loading arguments from config...[/dim]")
+            # Only use saved args if not explicitly provided via CLI
+            if not host and "host" in saved_args:
+                host = saved_args["host"]
+            if port == 22 and "port" in saved_args:
+                port = saved_args["port"]
+            if not username and "username" in saved_args:
+                username = saved_args["username"]
+            if not key and "key" in saved_args:
+                key = saved_args["key"]
+            if deploy_path == "/var/repos" and "deploy_path" in saved_args:
+                deploy_path = saved_args["deploy_path"]
+            if repo_path == "." and "repo_path" in saved_args:
+                repo_path = saved_args["repo_path"]
 
     # Validate local Git repository
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
@@ -70,6 +93,18 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
     # Get deployment path
     if interactive and deploy_path == "/var/repos":
         deploy_path = prompt_deploy_path()
+
+    # Save arguments to config
+    args_to_save = {
+        "repo_path": repo_path,
+        "host": host,
+        "port": port,
+        "username": username,
+        "key": key,
+        "deploy_path": deploy_path,
+    }
+    config.save_args(args_to_save, "push")
+    console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
 
     # Connect to remote server
     console.print("\n[bold]Step 3: Connecting to remote server[/bold]")
@@ -137,9 +172,10 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--pull/--no-pull", default=False, help="Pull from remote to local repository")
 @click.option("--sync-remote/--no-sync-remote", default=False, help="Check if remote working dir is clean, commit changes, push to bare repo, then pull")
 @click.option("--branch", "-b", help="Branch name to pull to (only used with --pull)")
+@click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
-         pull: bool, sync_remote: bool, branch: str):
+         pull: bool, sync_remote: bool, branch: str, use_config: bool):
     """Pull from remote repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
@@ -150,6 +186,26 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
         "Pull changes from remote repository to local",
         border_style="blue"
     ))
+
+    # Load from config if requested
+    config = DeployConfig()
+    if use_config:
+        saved_args = config.load_args("pull")
+        if saved_args:
+            console.print("[dim]Loading arguments from config...[/dim]")
+            # Only use saved args if not explicitly provided via CLI
+            if not host and "host" in saved_args:
+                host = saved_args["host"]
+            if port == 22 and "port" in saved_args:
+                port = saved_args["port"]
+            if not username and "username" in saved_args:
+                username = saved_args["username"]
+            if not key and "key" in saved_args:
+                key = saved_args["key"]
+            if deploy_path == "/var/repos" and "deploy_path" in saved_args:
+                deploy_path = saved_args["deploy_path"]
+            if repo_path == "." and "repo_path" in saved_args:
+                repo_path = saved_args["repo_path"]
 
     # Validate local Git repository
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
@@ -181,6 +237,18 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
     # Get deployment path
     if interactive and deploy_path == "/var/repos":
         deploy_path = prompt_deploy_path()
+
+    # Save arguments to config
+    args_to_save = {
+        "repo_path": repo_path,
+        "host": host,
+        "port": port,
+        "username": username,
+        "key": key,
+        "deploy_path": deploy_path,
+    }
+    config.save_args(args_to_save, "pull")
+    console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
 
     # Connect to remote server
     console.print("\n[bold]Step 3: Connecting to remote server[/bold]")
@@ -286,6 +354,49 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
         ssh.disconnect()
 
 
+@click.command()
+def show_config():
+    """Show saved configuration."""
+    config = DeployConfig()
+    config_data = config.load_config()
+    
+    if not config_data:
+        console.print("[yellow]No saved configuration found.[/yellow]")
+        return
+    
+    console.print(Panel.fit(
+        "[bold blue]Saved Configuration[/bold blue]",
+        border_style="blue"
+    ))
+    
+    for command, args in config_data.items():
+        console.print(f"\n[bold]{command.upper()}[/bold]")
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Argument", style="cyan")
+        table.add_column("Value", style="green")
+        
+        for key, value in args.items():
+            table.add_row(key, str(value))
+        
+        console.print(table)
+    
+    console.print(f"\n[dim]Config file: {config.get_config_path()}[/dim]")
+
+
+@click.command()
+@click.option("--command", "-c", type=click.Choice(["push", "pull"]), help="Clear config for specific command only")
+def clear_config(command: str):
+    """Clear saved configuration."""
+    config = DeployConfig()
+    
+    if command:
+        config.clear_config(command)
+        console.print(f"[green]✓ Cleared {command} configuration[/green]")
+    else:
+        config.clear_config()
+        console.print("[green]✓ Cleared all configuration[/green]")
+
+
 @click.group()
 def cli():
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH."""
@@ -294,6 +405,8 @@ def cli():
 
 cli.add_command(main, name="push")
 cli.add_command(pull, name="pull")
+cli.add_command(show_config, name="show-config")
+cli.add_command(clear_config, name="clear-config")
 
 
 if __name__ == "__main__":

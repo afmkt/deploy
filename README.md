@@ -59,6 +59,7 @@ Or, for interactive mode (recommended):
 - `--password`    : SSH password (not recommended; use key if possible)
 - `--deploy-path` : Path on remote server for deployment (default: /var/repos)
 - `--interactive/--no-interactive` : Enable/disable interactive prompts (default: interactive)
+- `--use-config/--no-use-config` : Load arguments from saved config file (default: no)
 
 #### Example
 
@@ -129,3 +130,50 @@ To pull (sync) changes from the remote server to your local repository:
 
 This will fetch and merge changes from the remote bare repository to your local branch.
 ```
+
+## Configuration Management
+
+The deploy tool automatically saves your latest arguments to a config file (`~/.deploy/config.json`) after each successful run. This allows you to reuse previous settings without retyping them.
+
+### Using Saved Configuration
+
+To load arguments from the saved config file:
+
+```sh
+./dist/deploy --use-config
+```
+
+Or for the pull command:
+
+```sh
+./dist/deploy pull --use-config
+```
+
+CLI arguments will override saved config values when both are provided.
+
+### Viewing Saved Configuration
+
+To see all saved configuration:
+
+```sh
+./dist/deploy show-config
+```
+
+### Clearing Saved Configuration
+
+To clear all saved configuration:
+
+```sh
+./dist/deploy clear-config
+```
+
+To clear configuration for a specific command only:
+
+```sh
+./dist/deploy clear-config --command push
+./dist/deploy clear-config --command pull
+```
+
+### Config File Location
+
+The config file is stored at `~/.deploy/config.json`. Note that passwords are never saved to the config file for security reasons.

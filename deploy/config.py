@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 class DeployConfig:
     """Manages deployment configuration and saves latest arguments."""
 
-    CONFIG_DIR = Path.home() / ".deploy"
+    CONFIG_DIR = Path.cwd() / ".deploy"
     CONFIG_FILE = CONFIG_DIR / "config.json"
 
     def __init__(self):

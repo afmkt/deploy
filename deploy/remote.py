@@ -236,10 +236,8 @@ class RemoteServer:
         if not self.init_bare_repo(bare_repo_path):
             return False, ""
 
-        # Setup working directory
-        working_dir_path = self.get_working_dir_path(repo_name)
-        if not self.clone_or_update_working_dir(bare_repo_path, working_dir_path, branch):
-            return False, ""
+        # Note: Working directory will be created after first push
+        # because bare repository is empty and has no branches yet
 
         # Generate SSH URL for the bare repository
         username = self.ssh.username or "root"

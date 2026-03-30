@@ -568,3 +568,405 @@ class CaddyManager:
                 name = file.stem.replace("caddy_", "")
                 templates.append(name)
         return sorted(templates)
+
+    def import_remote_config(self, template_dir: str, remote_address: str, force: bool = False) -> dict:
+        """Import remote Caddyfile entries to local template directory.
+
+        Args:
+            template_dir: Local directory to save templates (e.g., './')
+            remote_address: Remote server address (SSH host)
+            force: If True, overwrite existing templates without prompting
+
+        Returns:
+            Dictionary with import results:
+            {
+                'imported': [list of imported template paths],
+                'skipped': [list of skipped template paths],
+                'errors': [list of error messages]
+            }
+        """
+        from pathlib import Path
+        from rich.prompt import Confirm
+
+        result = {
+            'imported': [],
+            'skipped': [],
+            'errors': []
+        }
+
+        # Read remote Caddyfile
+        config_content = self.read_caddy_config()
+        if not config_content:
+            result['errors'].append("Could not read remote Caddyfile")
+            return result
+
+        # Parse detailed configuration
+        detailed_config = self.parse_detailed_config(config_content)
+
+        # Create template directory structure
+        template_path = Path(template_dir)
+        caddy_entry_dir = template_path / "caddy.entry"
+        remote_dir = caddy_entry_dir / remote_address
+
+        # Create directories if they don't exist
+        remote_dir.mkdir(parents=True, exist_ok=True)
+
+        console.print(f"[blue]Importing Caddy entries from {remote_address}...[/blue]")
+
+        # Import domain-based entries
+        for domain_info in detailed_config['domains']:
+            domain = domain_info['domain']
+            public_port = domain_info.get('public_port', '80')
+            config_lines = domain_info['config_lines']
+
+            # Generate template filename
+            template_filename = f"{domain}-{public_port}.caddy"
+            template_file_path = remote_dir / template_filename
+
+            # Generate template content
+            template_content = self._generate_entry_template(domain, config_lines)
+
+            # Check if file already exists
+            if template_file_path.exists() and not force:
+                console.print(f"[yellow]⚠ Template already exists: {template_file_path}[/yellow]")
+                if not Confirm.ask("Overwrite?", default=False):
+                    result['skipped'].append(str(template_file_path))
+                    continue
+
+            # Write template file
+            try:
+                with open(template_file_path, 'w') as f:
+                    f.write(template_content)
+                result['imported'].append(str(template_file_path))
+                console.print(f"[green]✓ Imported: {template_filename}[/green]")
+            except Exception as e:
+                error_msg = f"Failed to write {template_file_path}: {e}"
+                result['errors'].append(error_msg)
+                console.print(f"[red]✗ {error_msg}[/red]")
+
+        # Import public service entries
+        for service_info in detailed_config['public_services']:
+            listen_address = service_info.get('listen_address', '')
+            listen_port = service_info['listen_port']
+            config_lines = service_info['config_lines']
+
+            # Generate template filename for public service
+            if listen_address:
+                template_filename = f"{listen_address}-{listen_port}.caddy"
+            else:
+                template_filename = f"public-{listen_port}.caddy"
+            template_file_path = remote_dir / template_filename
+
+            # Generate template content
+            template_content = self._generate_public_service_template(listen_address, listen_port, config_lines)
+
+            # Check if file already exists
+            if template_file_path.exists() and not force:
+                console.print(f"[yellow]⚠ Template already exists: {template_file_path}[/yellow]")
+                if not Confirm.ask("Overwrite?", default=False):
+                    result['skipped'].append(str(template_file_path))
+                    continue
+
+            # Write template file
+            try:
+                with open(template_file_path, 'w') as f:
+                    f.write(template_content)
+                result['imported'].append(str(template_file_path))
+                console.print(f"[green]✓ Imported: {template_filename}[/green]")
+            except Exception as e:
+                error_msg = f"Failed to write {template_file_path}: {e}"
+                result['errors'].append(error_msg)
+                console.print(f"[red]✗ {error_msg}[/red]")
+
+        return result
+
+    def _generate_entry_template(self, domain: str, config_lines: list) -> str:
+        """Generate template content for a domain entry.
+
+        Args:
+            domain: Domain name
+            config_lines: List of configuration lines
+
+        Returns:
+            Template content as string
+        """
+        lines = [f"# Template for {domain}"]
+        lines.append(f"{domain} {{")
+        for line in config_lines:
+            lines.append(f"    {line}")
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _generate_public_service_template(self, listen_address: str, listen_port: str, config_lines: list) -> str:
+        """Generate template content for a public service entry.
+
+        Args:
+            listen_address: Listen address (e.g., '0.0.0.0', '127.0.0.1', '')
+            listen_port: Listen port
+            config_lines: List of configuration lines
+
+        Returns:
+            Template content as string
+        """
+        if listen_address:
+            header = f"{listen_address}:{listen_port}"
+        else:
+            header = f":{listen_port}"
+
+        lines = [f"# Template for public service on {header}"]
+        lines.append(f"{header} {{")
+        for line in config_lines:
+            lines.append(f"    {line}")
+        lines.append("}")
+        return "\n".join(lines)
+
+    def apply_template(self, template_path: str, force: bool = False) -> bool:
+        """Apply template file or directory to remote server.
+
+        Args:
+            template_path: Path to template file or directory
+            force: If True, skip confirmation prompts
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from pathlib import Path
+        from rich.prompt import Confirm
+
+        path = Path(template_path)
+
+        if not path.exists():
+            console.print(f"[red]✗ Template path does not exist: {template_path}[/red]")
+            return False
+
+        # Backup remote Caddyfile before any operation
+        config_path = self.get_caddy_config_path()
+        backup_cmd = f"cp {config_path} {config_path}.backup.$(date +%Y%m%d%H%M%S)"
+        self.ssh.execute(backup_cmd)
+        console.print(f"[dim]Backed up remote Caddyfile to {config_path}.backup.*[/dim]")
+
+        if path.is_file():
+            # Apply single template file
+            return self._apply_single_template(path, force)
+        elif path.is_dir():
+            # Apply all templates in directory
+            return self._apply_template_directory(path, force)
+        else:
+            console.print(f"[red]✗ Invalid template path: {template_path}[/red]")
+            return False
+
+    def _apply_single_template(self, template_file: Path, force: bool = False) -> bool:
+        """Apply a single template file to remote server.
+
+        Args:
+            template_file: Path to template file
+            force: If True, skip confirmation prompts
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from rich.prompt import Confirm
+
+        # Read template content
+        try:
+            with open(template_file, 'r') as f:
+                template_content = f.read()
+        except Exception as e:
+            console.print(f"[red]✗ Failed to read template file: {e}[/red]")
+            return False
+
+        # Parse template to extract domain/public service info
+        entry_info = self._parse_template_entry(template_content)
+        if not entry_info:
+            console.print(f"[red]✗ Failed to parse template file[/red]")
+            return False
+
+        # Check if entry already exists
+        if entry_info['type'] == 'domain':
+            domain = entry_info['domain']
+            if self.entry_exists(domain):
+                console.print(f"[yellow]⚠ Entry for {domain} already exists in remote Caddyfile[/yellow]")
+                if not force and not Confirm.ask("Update existing entry?", default=False):
+                    console.print("[yellow]Operation cancelled[/yellow]")
+                    return False
+
+                # Remove existing entry before adding new one
+                self._remove_entry(domain)
+
+        # Append template to remote Caddyfile
+        config_path = self.get_caddy_config_path()
+        escaped_content = template_content.replace("'", "'\\''")
+        append_cmd = f"printf '\n{escaped_content}\n' >> {config_path}"
+        exit_code, stdout, stderr = self.ssh.execute(append_cmd)
+
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to apply template: {stderr}[/red]")
+            return False
+
+        console.print(f"[green]✓ Applied template: {template_file.name}[/green]")
+        return True
+
+    def _apply_template_directory(self, template_dir: Path, force: bool = False) -> bool:
+        """Apply all templates in a directory to remote server.
+
+        Args:
+            template_dir: Path to template directory
+            force: If True, skip confirmation prompts
+
+        Returns:
+            True if successful, False otherwise
+        """
+        from rich.prompt import Confirm
+
+        # Find all .caddy files in directory
+        template_files = sorted(template_dir.glob("*.caddy"))
+
+        if not template_files:
+            console.print(f"[yellow]⚠ No .caddy files found in {template_dir}[/yellow]")
+            return False
+
+        console.print(f"[blue]Found {len(template_files)} template(s) in {template_dir}[/blue]")
+
+        # Generate complete Caddyfile from all templates
+        caddyfile_content = self._generate_caddyfile_from_templates(template_files)
+        if not caddyfile_content:
+            console.print("[red]✗ Failed to generate Caddyfile from templates[/red]")
+            return False
+
+        # Confirm before replacing remote Caddyfile
+        if not force:
+            console.print("[yellow]⚠ This will replace the entire remote Caddyfile[/yellow]")
+            if not Confirm.ask("Continue?", default=False):
+                console.print("[yellow]Operation cancelled[/yellow]")
+                return False
+
+        # Replace remote Caddyfile
+        config_path = self.get_caddy_config_path()
+        escaped_content = caddyfile_content.replace("'", "'\\''")
+        replace_cmd = f"printf '%s' '{escaped_content}' > {config_path}"
+        exit_code, stdout, stderr = self.ssh.execute(replace_cmd)
+
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to replace Caddyfile: {stderr}[/red]")
+            return False
+
+        console.print(f"[green]✓ Replaced remote Caddyfile with {len(template_files)} template(s)[/green]")
+        return True
+
+    def _generate_caddyfile_from_templates(self, template_files: list) -> str:
+        """Generate complete Caddyfile from template files.
+
+        Args:
+            template_files: List of template file paths
+
+        Returns:
+            Complete Caddyfile content
+        """
+        entries = []
+
+        for template_file in template_files:
+            try:
+                with open(template_file, 'r') as f:
+                    content = f.read().strip()
+                    if content:
+                        entries.append(content)
+            except Exception as e:
+                console.print(f"[yellow]⚠ Failed to read {template_file}: {e}[/yellow]")
+                continue
+
+        if not entries:
+            return ""
+
+        # Join all entries with newlines
+        return "\n\n".join(entries)
+
+    def _parse_template_entry(self, template_content: str) -> dict:
+        """Parse template content to extract entry information.
+
+        Args:
+            template_content: Template content string
+
+        Returns:
+            Dictionary with entry info or None if parsing fails
+        """
+        lines = template_content.strip().split('\n')
+        if not lines:
+            return None
+
+        # Find the first non-comment line that starts the block
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+
+            # Check for domain block: domain {
+            domain_match = re.match(r'^([a-zA-Z0-9][a-zA-Z0-9\-\.]*\.[a-zA-Z]{2,})\s*\{', line)
+            if domain_match:
+                return {
+                    'type': 'domain',
+                    'domain': domain_match.group(1)
+                }
+
+            # Check for public service block: :port { or address:port {
+            public_match = re.match(r'^(?::(\d+)|((?:0\.0\.0\.0|\*|localhost|127\.0\.0\.1)):(\d+))\s*\{', line)
+            if public_match:
+                listen_address = public_match.group(2) or ""
+                listen_port = public_match.group(1) or public_match.group(3)
+                return {
+                    'type': 'public',
+                    'listen_address': listen_address,
+                    'listen_port': listen_port
+                }
+
+        return None
+
+    def _remove_entry(self, domain: str) -> bool:
+        """Remove an existing entry from remote Caddyfile.
+
+        Args:
+            domain: Domain name to remove
+
+        Returns:
+            True if successful, False otherwise
+        """
+        config_path = self.get_caddy_config_path()
+        config_content = self.read_caddy_config()
+        if not config_content:
+            return False
+
+        # Parse and remove the domain block
+        lines = config_content.split('\n')
+        new_lines = []
+        in_target_block = False
+        brace_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Check if this is the start of the target domain block
+            if not in_target_block:
+                domain_pattern = rf'^{re.escape(domain)}\s*\{{'
+                if re.match(domain_pattern, stripped):
+                    in_target_block = True
+                    brace_count = 1
+                    continue
+
+            # If we're in the target block, track braces and skip lines
+            if in_target_block:
+                brace_count += stripped.count('{')
+                brace_count -= stripped.count('}')
+
+                if brace_count == 0:
+                    in_target_block = False
+                continue
+
+            # Keep lines that are not in the target block
+            new_lines.append(line)
+
+        # Write back the modified content
+        new_content = '\n'.join(new_lines)
+        escaped_content = new_content.replace("'", "'\\''")
+        replace_cmd = f"printf '%s' '{escaped_content}' > {config_path}"
+        exit_code, stdout, stderr = self.ssh.execute(replace_cmd)
+
+        return exit_code == 0

@@ -418,12 +418,25 @@ def clear_config(command: str):
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and configuration without making changes")
+@click.option("--template-dir", help="Import remote Caddyfile entries to local directory")
+@click.option("--apply", "apply_path", help="Apply template file or directory to remote server")
+@click.option("--force", is_flag=True, help="Skip confirmation prompts")
 def caddy(host: str, port: int, username: str, key: str, password: str,
-          template: str, interactive: bool, use_config: bool, dry_run: bool):
+          template: str, interactive: bool, use_config: bool, dry_run: bool,
+          template_dir: str, apply_path: str, force: bool):
     """Setup and configure Caddy reverse proxy on remote server.
     
     This command helps you install Caddy, analyze existing configuration,
     and add new reverse proxy entries.
+    
+    Import mode (--template-dir):
+        Import remote Caddyfile entries to local directory.
+        Creates caddy.entry/{remote_address}/{domain}-{port}.caddy files.
+    
+    Apply mode (--apply):
+        Apply template file or directory to remote server.
+        Single file: Append or update entry in remote Caddyfile.
+        Directory: Replace entire remote Caddyfile with all templates.
     """
     # Display banner
     console.print(Panel.fit(
@@ -494,6 +507,53 @@ def caddy(host: str, port: int, username: str, key: str, password: str,
 
     # Initialize Caddy manager
     caddy_mgr = CaddyManager(ssh)
+
+    # Handle import operation
+    if template_dir:
+        console.print("\n[bold]Importing remote Caddyfile entries[/bold]")
+        result = caddy_mgr.import_remote_config(template_dir, host, force)
+        
+        # Show summary
+        console.print("\n[bold]Import Summary:[/bold]")
+        console.print(f"  Imported: {len(result['imported'])} template(s)")
+        console.print(f"  Skipped: {len(result['skipped'])} template(s)")
+        console.print(f"  Errors: {len(result['errors'])}")
+        
+        if result['imported']:
+            console.print("\n[bold]Imported templates:[/bold]")
+            for template_path in result['imported']:
+                console.print(f"  • {template_path}")
+        
+        if result['errors']:
+            console.print("\n[bold red]Errors:[/bold red]")
+            for error in result['errors']:
+                console.print(f"  • {error}")
+        
+        ssh.disconnect()
+        return
+
+    # Handle apply operation
+    if apply_path:
+        console.print("\n[bold]Applying template to remote server[/bold]")
+        success = caddy_mgr.apply_template(apply_path, force)
+        
+        if success:
+            # Validate configuration
+            console.print("\n[bold]Validating configuration[/bold]")
+            if caddy_mgr.validate_config():
+                # Reload Caddy
+                console.print("\n[bold]Reloading Caddy[/bold]")
+                caddy_mgr.reload_caddy()
+                console.print("\n[bold green]✓ Template applied successfully![/bold green]")
+            else:
+                console.print("\n[red]✗ Configuration validation failed[/red]")
+                sys.exit(1)
+        else:
+            console.print("\n[red]✗ Failed to apply template[/red]")
+            sys.exit(1)
+        
+        ssh.disconnect()
+        return
 
     if dry_run:
         console.print("\n[bold]Dry Run Analysis[/bold]")

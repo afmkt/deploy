@@ -419,7 +419,7 @@ def clear_config(command: str):
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and configuration without making changes")
 @click.option("--template-dir", help="Import remote Caddyfile entries to local directory")
-@click.option("--apply", "apply_path", help="Apply template file or directory to remote server")
+@click.option("--apply", "apply_path", default=None, help="Apply template file or directory to remote server")
 @click.option("--force", is_flag=True, help="Skip confirmation prompts")
 def caddy(host: str, port: int, username: str, key: str, password: str,
           template: str, interactive: bool, use_config: bool, dry_run: bool,
@@ -732,10 +732,27 @@ def caddy(host: str, port: int, username: str, key: str, password: str,
         else:
             console.print("[yellow]Could not read Caddy configuration[/yellow]")
 
-        # Get user input for new entry
-        console.print("\n[bold]Step 5: Configure new entry[/bold]")
+        # Import remote configuration to local directory
+        console.print("\n[bold]Step 5: Importing remote configuration[/bold]")
+        import_result = caddy_mgr.import_remote_config(".", host, force)
         
-        # Show available templates
+        # Show import summary
+        if import_result['imported']:
+            console.print(f"[green]✓ Imported {len(import_result['imported'])} template(s) from remote[/green]")
+        elif import_result['errors']:
+            console.print(f"[yellow]⚠ Could not import from remote: {import_result['errors'][0]}[/yellow]")
+            console.print("[dim]Using local templates instead[/dim]")
+        
+        # If --use-config is specified, exit after importing
+        if use_config:
+            console.print("\n[bold green]✓ Import complete![/bold green]")
+            ssh.disconnect()
+            return
+        
+        # Get user input for new entry
+        console.print("\n[bold]Step 6: Configure new entry[/bold]")
+        
+        # Show available templates (now includes imported ones)
         available_templates = caddy_mgr.get_available_templates()
         if available_templates:
             console.print(f"\n[bold]Available templates:[/bold] {', '.join(available_templates)}")
@@ -798,19 +815,19 @@ def caddy(host: str, port: int, username: str, key: str, password: str,
                     return
 
         # Add entry
-        console.print("\n[bold]Step 6: Adding Caddy entry[/bold]")
+        console.print("\n[bold]Step 7: Adding Caddy entry[/bold]")
         if not caddy_mgr.add_entry(domain, port_num, template):
             console.print("[red]✗ Failed to add entry[/red]")
             sys.exit(1)
 
         # Validate configuration
-        console.print("\n[bold]Step 7: Validating configuration[/bold]")
+        console.print("\n[bold]Step 8: Validating configuration[/bold]")
         if not caddy_mgr.validate_config():
             console.print("[red]✗ Configuration validation failed[/red]")
             sys.exit(1)
 
         # Reload Caddy
-        console.print("\n[bold]Step 8: Reloading Caddy[/bold]")
+        console.print("\n[bold]Step 9: Reloading Caddy[/bold]")
         caddy_mgr.reload_caddy()
 
         # Print summary

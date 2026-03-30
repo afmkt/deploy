@@ -402,13 +402,20 @@ class CaddyManager:
         Returns:
             Public port string or None
         """
-        # Look for tls directive which indicates HTTPS (port 443)
+        # Look for explicit tls directive which indicates HTTPS (port 443)
         for line in config_lines:
             if 'tls' in line:
                 return "443"
         
-        # Default to HTTP port 80 if no TLS
-        return "80"
+        # Look for explicit http:// scheme or port 80
+        for line in config_lines:
+            if 'http://' in line or ':80' in line:
+                return "80"
+        
+        # Caddy automatically enables HTTPS for domain names
+        # If we have a domain block (not public service), default to 443
+        # This aligns with Caddy's automatic HTTPS behavior
+        return "443"
 
     def load_template(self, template_name: str = "default") -> Optional[str]:
         """Load a Caddy configuration template.
@@ -419,18 +426,33 @@ class CaddyManager:
         Returns:
             Template content or None if not found
         """
+        # First check local templates directory
         template_path = self._templates_dir / f"caddy_{template_name}.conf"
-
-        if not template_path.exists():
-            console.print(f"[red]✗ Template not found: {template_name}[/red]")
-            return None
-
-        try:
-            with open(template_path, "r") as f:
-                return f.read()
-        except Exception as e:
-            console.print(f"[red]✗ Failed to load template: {e}[/red]")
-            return None
+        if template_path.exists():
+            try:
+                with open(template_path, "r") as f:
+                    return f.read()
+            except Exception as e:
+                console.print(f"[red]✗ Failed to load template: {e}[/red]")
+                return None
+        
+        # Then check imported templates in .deploy/caddy.entry directory
+        caddy_entry_dir = Path(".deploy") / "caddy.entry"
+        if caddy_entry_dir.exists():
+            for remote_dir in caddy_entry_dir.iterdir():
+                if remote_dir.is_dir():
+                    # Look for template file matching the name
+                    template_file = remote_dir / f"{template_name}.caddy"
+                    if template_file.exists():
+                        try:
+                            with open(template_file, "r") as f:
+                                return f.read()
+                        except Exception as e:
+                            console.print(f"[red]✗ Failed to load template: {e}[/red]")
+                            return None
+        
+        console.print(f"[red]✗ Template not found: {template_name}[/red]")
+        return None
 
     def render_template(self, template: str, domain: str, port: int) -> str:
         """Render a template with domain and port values.
@@ -562,11 +584,25 @@ class CaddyManager:
             List of template names
         """
         templates = []
+        
+        # Check local templates directory
         if self._templates_dir.exists():
             for file in self._templates_dir.glob("caddy_*.conf"):
                 # Extract template name from filename
                 name = file.stem.replace("caddy_", "")
                 templates.append(name)
+        
+        # Check imported templates in .deploy/caddy.entry directory
+        caddy_entry_dir = Path(".deploy") / "caddy.entry"
+        if caddy_entry_dir.exists():
+            for remote_dir in caddy_entry_dir.iterdir():
+                if remote_dir.is_dir():
+                    for file in remote_dir.glob("*.caddy"):
+                        # Use filename without extension as template name
+                        name = file.stem
+                        if name not in templates:
+                            templates.append(name)
+        
         return sorted(templates)
 
     def import_remote_config(self, template_dir: str, remote_address: str, force: bool = False) -> dict:
@@ -605,7 +641,7 @@ class CaddyManager:
 
         # Create template directory structure
         template_path = Path(template_dir)
-        caddy_entry_dir = template_path / "caddy.entry"
+        caddy_entry_dir = template_path / ".deploy" / "caddy.entry"
         remote_dir = caddy_entry_dir / remote_address
 
         # Create directories if they don't exist

@@ -67,3 +67,6 @@ venv.bak/
 
 # Temporary session notes
 .vibe/
+
+# Deploy configuration and templates
+.deploy/

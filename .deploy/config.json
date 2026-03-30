@@ -1,0 +1,9 @@
+{
+  "caddy": {
+    "host": "47.100.30.18",
+    "port": 22,
+    "username": "root",
+    "key": "/Users/michael/.ssh/id_rsa",
+    "template": "default"
+  }
+}

@@ -137,6 +137,24 @@ class GitRepository:
         except subprocess.CalledProcessError:
             return None
 
+    def get_current_revision(self) -> Optional[str]:
+        """Get the current commit revision (short hash).
+
+        Returns:
+            Current commit short hash or None if not on a commit
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=self.path,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except subprocess.CalledProcessError:
+            return None
+
     def get_repo_name(self) -> str:
         """Get the repository name from the path.
 

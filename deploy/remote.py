@@ -152,6 +152,22 @@ class RemoteServer:
         """
         return f"{self.deploy_path}/{repo_name}"
 
+    def get_remote_revision(self, working_dir_path: str) -> Optional[str]:
+        """Get the current commit revision from remote working directory.
+
+        Args:
+            working_dir_path: Path to the working directory on remote server
+
+        Returns:
+            Current commit short hash or None if not on a commit
+        """
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"cd {working_dir_path} && git rev-parse --short HEAD"
+        )
+        if exit_code == 0:
+            return stdout.strip()
+        return None
+
     def commit_remote_changes(self, working_dir_path: str, message: str = "Update from remote") -> bool:
         """Commit changes in the remote working directory.
 

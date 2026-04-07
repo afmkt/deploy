@@ -159,8 +159,13 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
             console.print("[red]✗ Failed to update remote working directory[/red]")
             sys.exit(1)
 
+        # Get revision information
+        local_revision = repo.get_current_revision()
+        remote_revision = remote.get_remote_revision(working_dir_path)
+
         # Print summary
-        print_summary(host, repo_name, bare_repo_url, working_dir_path)
+        print_summary(host, repo_name, bare_repo_url, working_dir_path,
+                     local_revision=local_revision, remote_revision=remote_revision)
 
     finally:
         ssh.disconnect()
@@ -359,7 +364,13 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
             console.print("[red]✗ Failed to pull from remote[/red]")
             sys.exit(1)
 
+        # Get revision information
+        local_revision = repo.get_current_revision()
+        remote_revision = remote.get_remote_revision(working_dir_path)
         console.print("\n[green]✓ Pull operation completed successfully[/green]")
+        console.print(f"\n[bold]Revision Info:[/bold]")
+        console.print(f"  Local: {local_revision or 'unknown'}")
+        console.print(f"  Remote: {remote_revision or 'unknown'}")
 
     finally:
         ssh.disconnect()

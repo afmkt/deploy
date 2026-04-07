@@ -153,7 +153,8 @@ def prompt_deploy_path() -> str:
     return deploy_path
 
 
-def print_summary(host: str, repo_name: str, bare_repo_url: str, working_dir_path: str):
+def print_summary(host: str, repo_name: str, bare_repo_url: str, working_dir_path: str,
+                  local_revision: str | None = None, remote_revision: str | None = None):
     """Print deployment summary.
 
     Args:
@@ -161,13 +162,18 @@ def print_summary(host: str, repo_name: str, bare_repo_url: str, working_dir_pat
         repo_name: Repository name
         bare_repo_url: URL of the bare repository
         working_dir_path: Path to working directory on remote server
+        local_revision: Local working directory revision
+        remote_revision: Remote working directory revision
     """
     console.print("\n[bold green]✓ Deployment Complete![/bold green]")
     console.print(f"\n[bold]Summary:[/bold]")
     console.print(f"  Remote Host: {host}")
     console.print(f"  Repository: {repo_name}")
     console.print(f"  Bare Repo URL: {bare_repo_url}")
-    console.print(f"  Working Directory: {working_dir_path}")
+    console.print(f"  Remote Working Directory: {working_dir_path}" +
+                  (f"  Revision: {remote_revision}" if remote_revision else ""))
+    console.print(f"  Local Working Directory: ." +
+                  (f"  Revision: {local_revision}" if local_revision else ""))
     console.print(f"\n[bold]Next Steps:[/bold]")
     console.print(f"  1. Add the bare repo URL as a remote:")
     console.print(f"     git remote add deploy {bare_repo_url}")

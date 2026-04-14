@@ -10,6 +10,7 @@ from deploy.git import GitRepository
 from deploy.ssh import SSHConnection
 from deploy.remote import RemoteServer
 from deploy.caddy import CaddyManager
+from deploy.docker import DockerManager, _safe_image_filename
 from deploy.config import DeployConfig
 from deploy.utils import (
     prompt_connection_details,
@@ -286,6 +287,11 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
         bare_repo_path = remote.get_bare_repo_path(repo_name)
         working_dir_path = remote.get_working_dir_path(repo_name)
 
+        # Abort early on local dirty state to avoid accidental merge conflicts.
+        if repo.has_uncommitted_changes():
+            console.print("[red]✗ Local repository has uncommitted changes; commit or stash before pulling[/red]")
+            sys.exit(1)
+
         # Check if bare repository exists
         if not remote.directory_exists(bare_repo_path):
             console.print(f"[red]✗ Remote repository does not exist: {bare_repo_path}[/red]")
@@ -294,21 +300,13 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
         # Optional: Sync remote working directory (check clean, commit, push, then pull)
         if sync_remote:
             console.print("\n[bold]Step 4: Checking if remote working directory is clean[/bold]")
-            # Check if there are uncommitted changes
-            exit_code, stdout, stderr = ssh.execute(
-                f"cd {working_dir_path} && git status --porcelain"
-            )
-            if exit_code != 0:
-                console.print(f"[red]✗ Failed to check git status: {stderr}[/red]")
+            has_uncommitted = remote.has_uncommitted_changes(working_dir_path)
+            if has_uncommitted is None:
                 sys.exit(1)
-            
-            has_uncommitted = bool(stdout.strip())
-            
-            # Check if there are unpushed commits
-            exit_code, stdout, stderr = ssh.execute(
-                f"cd {working_dir_path} && git log origin/$(git rev-parse --abbrev-ref HEAD)..HEAD --oneline 2>/dev/null || echo ''"
-            )
-            has_unpushed = bool(stdout.strip()) if exit_code == 0 else False
+
+            has_unpushed = remote.has_unpushed_commits(working_dir_path)
+            if has_unpushed is None:
+                sys.exit(1)
             
             if has_uncommitted or has_unpushed:
                 if has_uncommitted:
@@ -853,6 +851,193 @@ def caddy(host: str, port: int, username: str, key: str, password: str,
         ssh.disconnect()
 
 
+@click.command()
+@click.option("--image", "-i", required=True, help="Docker image to push (name:tag)")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password (not recommended, use key instead)")
+@click.option("--platform", help="Target platform override (e.g. linux/amd64, linux/arm64)")
+@click.option("--registry-username", help="Docker registry username for private images")
+@click.option("--registry-password", help="Docker registry password for private images")
+@click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
+@click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
+@click.option("--dry-run", is_flag=True, help="Validate connection without transferring image")
+def docker_push(image: str, host: str, port: int, username: str, key: str,
+                password: str, platform: str, registry_username: str,
+                registry_password: str, interactive: bool, use_config: bool,
+                dry_run: bool):
+    """Push a Docker image to a remote server over SSH.
+
+    Pulls the image locally (targeting the remote server architecture), saves it
+    to a tarball, transfers it via SFTP, and loads it on the remote server.
+    """
+    import tempfile
+    import os
+
+    console.print(Panel.fit(
+        "[bold blue]Git SSH Deploy Tool - Docker Push[/bold blue]\n"
+        "Transfer a Docker image to a remote server over SSH",
+        border_style="blue",
+    ))
+
+    # Load saved config if requested
+    config = DeployConfig()
+    if use_config:
+        saved_args = config.load_args("docker-push")
+        fallback_sources = ["push", "pull", "caddy"]
+
+        # docker-push uses the same SSH transport as other commands. If its
+        # own saved config is incomplete, prefer a complete existing SSH profile
+        # instead of mixing partial values from multiple commands.
+        if not saved_args.get("host") or not saved_args.get("username") or not saved_args.get("key"):
+            if saved_args:
+                console.print(
+                    "[yellow]docker-push config is incomplete; trying SSH settings from push/pull/caddy.[/yellow]"
+                )
+            for source in fallback_sources:
+                candidate = config.load_args(source)
+                if candidate.get("host") and candidate.get("username") and candidate.get("key"):
+                    saved_args = candidate
+                    console.print(f"[dim]Loading SSH arguments from '{source}' config...[/dim]")
+                    break
+        elif saved_args:
+            console.print("[dim]Loading arguments from config...[/dim]")
+
+        if saved_args:
+            if not host and "host" in saved_args:
+                host = saved_args["host"]
+            if port == 22 and "port" in saved_args:
+                port = saved_args["port"]
+            if not username and "username" in saved_args:
+                username = saved_args["username"]
+            if not key and "key" in saved_args:
+                key = saved_args["key"]
+
+    # Connection details
+    console.print("\n[bold]Step 1: Configuring SSH connection[/bold]")
+    if interactive and not host:
+        conn_details = prompt_connection_details()
+        host = conn_details["host"]
+        port = conn_details["port"]
+        username = conn_details["username"]
+        key = conn_details["key_filename"]
+        password = conn_details["password"]
+    else:
+        if not host:
+            console.print("[red]✗ Host is required[/red]")
+            sys.exit(1)
+        if not username:
+            console.print("[red]✗ Username is required[/red]")
+            sys.exit(1)
+
+    # Persist non-sensitive args
+    config.save_args({"host": host, "port": port, "username": username, "key": key}, "docker-push")
+    console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
+
+    # SSH connect
+    console.print("\n[bold]Step 2: Connecting to remote server[/bold]")
+    ssh = SSHConnection(host=host, port=port, username=username,
+                        password=password, key_filename=key)
+    if not ssh.connect():
+        sys.exit(1)
+
+    docker_mgr = DockerManager(ssh)
+
+    if dry_run:
+        console.print("\n[bold]Dry Run Analysis[/bold]")
+        if docker_mgr.is_docker_installed():
+            version = docker_mgr.get_docker_version()
+            console.print(f"  [green]✓ Docker is installed on remote (version: {version})[/green]")
+        else:
+            console.print("  [yellow]⚠ Docker is not installed on remote[/yellow]")
+        detected = docker_mgr.detect_remote_arch()
+        effective_platform = platform or detected
+        console.print(f"  Platform: {effective_platform or 'unknown'}")
+        console.print(f"  Image: {image}")
+        console.print("\n[green]✓ Dry run completed[/green]")
+        ssh.disconnect()
+        return
+
+    try:
+        # Step 3: Ensure Docker is installed on remote
+        console.print("\n[bold]Step 3: Checking Docker on remote server[/bold]")
+        if not docker_mgr.is_docker_installed():
+            console.print("[yellow]Docker is not installed on the remote server[/yellow]")
+            if interactive:
+                from rich.prompt import Confirm
+                if not Confirm.ask("Install Docker now?", default=True):
+                    console.print("[yellow]Docker installation skipped — cannot proceed[/yellow]")
+                    sys.exit(1)
+            if not docker_mgr.install_docker():
+                console.print("[red]✗ Failed to install Docker[/red]")
+                sys.exit(1)
+        else:
+            version = docker_mgr.get_docker_version()
+            console.print(f"[green]✓ Docker is installed (version: {version})[/green]")
+
+        # Step 4: Resolve target platform
+        console.print("\n[bold]Step 4: Detecting target platform[/bold]")
+        if platform:
+            console.print(f"[dim]Using user-supplied platform: {platform}[/dim]")
+        else:
+            platform = docker_mgr.detect_remote_arch()
+            if not platform:
+                console.print("[red]✗ Could not detect remote architecture[/red]")
+                sys.exit(1)
+
+        # Step 5: Registry login (if credentials provided)
+        if registry_username and registry_password:
+            console.print("\n[bold]Step 5: Authenticating with Docker registry[/bold]")
+            if not docker_mgr.registry_login(registry_username, registry_password, image):
+                sys.exit(1)
+
+        # Step 6: Pull image locally for the target platform
+        step = 6 if (registry_username and registry_password) else 5
+        console.print(f"\n[bold]Step {step}: Pulling image locally[/bold]")
+        if not docker_mgr.pull_image(image, platform):
+            sys.exit(1)
+
+        # Step 7: Save image to local tarball
+        step += 1
+        console.print(f"\n[bold]Step {step}: Saving image to tarball[/bold]")
+        tmpdir = tempfile.mkdtemp(prefix="deploy_docker_")
+        tar_filename = _safe_image_filename(image)
+        local_tar = os.path.join(tmpdir, tar_filename)
+        if not docker_mgr.save_image(image, local_tar, platform):
+            sys.exit(1)
+
+        # Step 8: Transfer tarball to remote
+        step += 1
+        remote_tar = f"/tmp/{tar_filename}"
+        console.print(f"\n[bold]Step {step}: Transferring tarball to remote[/bold]")
+        if not docker_mgr.transfer_tarball(local_tar, remote_tar):
+            sys.exit(1)
+
+        # Step 9: Load on remote
+        step += 1
+        console.print(f"\n[bold]Step {step}: Loading image on remote server[/bold]")
+        if not docker_mgr.load_image(remote_tar, image):
+            sys.exit(1)
+
+        # Step 10: Cleanup
+        step += 1
+        console.print(f"\n[bold]Step {step}: Cleaning up[/bold]")
+        docker_mgr.cleanup_remote(remote_tar)
+        try:
+            os.remove(local_tar)
+            os.rmdir(tmpdir)
+            console.print("[dim]Cleaned up local tarball[/dim]")
+        except OSError:
+            pass
+
+        console.print(f"\n[bold green]✓ Docker image '{image}' transferred successfully to {host}[/bold green]")
+
+    finally:
+        ssh.disconnect()
+
+
 @click.group()
 def cli():
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH."""
@@ -864,6 +1049,7 @@ cli.add_command(pull, name="pull")
 cli.add_command(show_config, name="show-config")
 cli.add_command(clear_config, name="clear-config")
 cli.add_command(caddy, name="caddy")
+cli.add_command(docker_push, name="docker-push")
 
 
 if __name__ == "__main__":

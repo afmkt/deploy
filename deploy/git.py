@@ -1,6 +1,5 @@
 """Git operations module using subprocess."""
 
-import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -217,6 +216,26 @@ class GitRepository:
             console.print(f"[red]✗ Pull failed: {e}[/red]")
             return False
 
+    def has_uncommitted_changes(self) -> bool:
+        """Check whether local working tree has uncommitted changes.
+
+        Returns:
+            True when dirty or when status check fails, False when clean
+        """
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=self.path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return bool(result.stdout.strip())
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]✗ Failed to check local git status: {e}[/red]")
+            # Be conservative when status cannot be determined.
+            return True
+
     def checkout_branch(self, branch_name: str, create: bool = False) -> bool:
         """Checkout a branch.
 
@@ -229,12 +248,19 @@ class GitRepository:
         """
         try:
             if create:
-                console.print(f"[blue]Creating and checking out branch: {branch_name}[/blue]")
-                subprocess.run(
-                    ["git", "checkout", "-b", branch_name],
-                    cwd=self.path,
-                    check=True
-                )
+                console.print(f"[blue]Checking out branch (create if missing): {branch_name}[/blue]")
+                try:
+                    subprocess.run(
+                        ["git", "checkout", branch_name],
+                        cwd=self.path,
+                        check=True,
+                    )
+                except subprocess.CalledProcessError:
+                    subprocess.run(
+                        ["git", "checkout", "-b", branch_name],
+                        cwd=self.path,
+                        check=True,
+                    )
             else:
                 console.print(f"[blue]Checking out branch: {branch_name}[/blue]")
                 subprocess.run(

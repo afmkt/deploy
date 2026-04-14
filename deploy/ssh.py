@@ -1,5 +1,6 @@
 """SSH connection management module using paramiko."""
 
+import socket
 from typing import Optional
 import paramiko
 from rich.console import Console
@@ -28,6 +29,20 @@ class SSHConnection:
         self.key_filename = key_filename
         self.client = None
 
+    def _target(self) -> str:
+        """Return a human-friendly SSH target string."""
+        username = self.username or "<unknown-user>"
+        host = self.host or "<unknown-host>"
+        return f"{username}@{host}:{self.port}"
+
+    def _auth_method(self) -> str:
+        """Return a human-friendly auth description."""
+        if self.key_filename:
+            return f"key {self.key_filename}"
+        if self.password:
+            return "password"
+        return "default SSH auth"
+
     def connect(self) -> bool:
         """Establish SSH connection to remote server.
 
@@ -50,24 +65,41 @@ class SSHConnection:
                 connect_kwargs["password"] = self.password
 
             self.client.connect(**connect_kwargs)
-            console.print(f"[green]✓ Connected to {self.host}[/green]")
+            console.print(f"[green]✓ Connected to {self._target()}[/green]")
             return True
 
         except paramiko.AuthenticationException:
-            console.print(f"[red]✗ Authentication failed for {self.host}[/red]")
+            console.print(
+                f"[red]✗ Authentication failed for {self._target()} using {self._auth_method()}[/red]"
+            )
+            return False
+        except (socket.timeout, TimeoutError) as e:
+            console.print(
+                f"[red]✗ Connection timed out for {self._target()} using {self._auth_method()}: {e}[/red]"
+            )
+            console.print(
+                "[yellow]Check the host, port, network path, and whether --use-config loaded stale SSH settings.[/yellow]"
+            )
+            return False
+        except FileNotFoundError as e:
+            console.print(
+                f"[red]✗ SSH key file not found for {self._target()}: {e}[/red]"
+            )
             return False
         except paramiko.SSHException as e:
-            console.print(f"[red]✗ SSH error: {e}[/red]")
+            console.print(f"[red]✗ SSH error for {self._target()} using {self._auth_method()}: {e}[/red]")
             return False
         except Exception as e:
-            console.print(f"[red]✗ Connection failed: {e}[/red]")
+            console.print(
+                f"[red]✗ Connection failed for {self._target()} using {self._auth_method()}: {e}[/red]"
+            )
             return False
 
     def disconnect(self):
         """Close SSH connection."""
         if self.client:
             self.client.close()
-            console.print(f"[yellow]Disconnected from {self.host}[/yellow]")
+            console.print(f"[yellow]Disconnected from {self._target()}[/yellow]")
 
     def execute(self, command: str) -> tuple[int, str, str]:
         """Execute command on remote server.

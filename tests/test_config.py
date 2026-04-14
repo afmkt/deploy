@@ -158,7 +158,7 @@ def test_config_default_directory():
             
             # Verify config directory is in current working directory
             expected_dir = Path(tmpdir) / ".deploy"
-            assert config.get_config_path() == expected_dir / "config.json"
+            assert config.get_config_path().resolve() == (expected_dir / "config.json").resolve()
             
             # Verify we can save and load
             config.save_args({"host": "test.com"}, "push")

@@ -69,4 +69,4 @@ venv.bak/
 .vibe/
 
 # Deploy configuration and templates
-.deploy/
+.deploy

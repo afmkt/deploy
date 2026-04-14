@@ -12,7 +12,8 @@ class SSHConnection:
     """Manages SSH connections to remote servers."""
 
     def __init__(self, host: str, port: int = 22, username: Optional[str] = None,
-                 password: Optional[str] = None, key_filename: Optional[str] = None):
+                 password: Optional[str] = None, key_filename: Optional[str] = None,
+                 command_timeout: Optional[float] = None):
         """Initialize SSH connection parameters.
 
         Args:
@@ -21,12 +22,14 @@ class SSHConnection:
             username: SSH username
             password: SSH password (optional if using key)
             key_filename: Path to SSH private key file (optional)
+            command_timeout: Default timeout in seconds for remote commands
         """
         self.host = host
         self.port = port
         self.username = username
         self.password = password
         self.key_filename = key_filename
+        self.command_timeout = command_timeout
         self.client = None
 
     def _target(self) -> str:
@@ -101,11 +104,13 @@ class SSHConnection:
             self.client.close()
             console.print(f"[yellow]Disconnected from {self._target()}[/yellow]")
 
-    def execute(self, command: str) -> tuple[int, str, str]:
+    def execute(self, command: str, timeout: Optional[float] = None) -> tuple[int, str, str]:
         """Execute command on remote server.
 
         Args:
             command: Command to execute
+            timeout: Optional timeout in seconds for this command. If omitted,
+                falls back to the connection's default command timeout.
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
@@ -115,12 +120,23 @@ class SSHConnection:
             return -1, "", "Not connected"
 
         try:
-            stdin, stdout, stderr = self.client.exec_command(command)
+            effective_timeout = timeout if timeout is not None else self.command_timeout
+            stdin, stdout, stderr = self.client.exec_command(command, timeout=effective_timeout)
+            if effective_timeout is not None:
+                stdout.channel.settimeout(effective_timeout)
+                stderr.channel.settimeout(effective_timeout)
             exit_code = stdout.channel.recv_exit_status()
-            stdout_str = stdout.read().decode("utf-8")
-            stderr_str = stderr.read().decode("utf-8")
+            stdout_str = stdout.read().decode("utf-8", errors="replace")
+            stderr_str = stderr.read().decode("utf-8", errors="replace")
 
             return exit_code, stdout_str, stderr_str
+
+        except socket.timeout:
+            effective_timeout = timeout if timeout is not None else self.command_timeout
+            timeout_str = f" after {effective_timeout}s" if effective_timeout else ""
+            message = f"Command timed out{timeout_str}"
+            console.print(f"[red]✗ {message}: {command}[/red]")
+            return -1, "", message
 
         except Exception as e:
             console.print(f"[red]✗ Command execution failed: {e}[/red]")

@@ -1615,6 +1615,70 @@ def service_status(name, host, port, username, key, password, use_config):
 
 
 # ---------------------------------------------------------------------------
+# monitor command
+# ---------------------------------------------------------------------------
+
+@click.command(name="monitor")
+@click.option("--host", "host", help="Remote server hostname or IP")
+@click.option("--port", "port", default=22, show_default=True, help="SSH port")
+@click.option("--username", "username", help="SSH username")
+@click.option("--key", "key", help="Path to SSH private key")
+@click.option("--password", "password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--refresh-interval", default=5, show_default=True,
+              help="Polling interval in seconds")
+@click.option("--log-lines", default=120, show_default=True,
+              help="How many lines to fetch for logs action")
+@click.option("--command-timeout", default=10.0, show_default=True,
+              help="Per-command SSH timeout in seconds")
+@click.option("--action-timeout", default=15.0, show_default=True,
+              help="Overall monitor action timeout in seconds")
+def monitor(host, port, username, key, password, use_config, refresh_interval, log_lines,
+            command_timeout, action_timeout):
+    """Run a long-running TUI monitor for proxy/services/networks/resources."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "monitor", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        console.print("[dim]Use --host/--username or save config via push/pull/proxy/service first[/dim]")
+        sys.exit(1)
+
+    config.save_args({
+        "host": ssh.host,
+        "port": ssh.port,
+        "username": ssh.username,
+        "key": ssh.key_filename,
+    }, "monitor")
+
+    try:
+        from deploy.monitor.app import MonitorApp
+    except ImportError as exc:
+        console.print("[red]✗ Monitor dependencies are missing[/red]")
+        console.print("[dim]Install project dependencies, including 'textual', then retry.[/dim]")
+        console.print(f"[dim]{exc}[/dim]")
+        sys.exit(1)
+
+    console.print(Panel.fit(
+        "[bold blue]Deploy Monitor[/bold blue]\n"
+        f"Target: {ssh.username}@{ssh.host}:{ssh.port}",
+        border_style="blue",
+    ))
+    app = MonitorApp(
+        host=ssh.host,
+        port=ssh.port,
+        username=ssh.username,
+        key_filename=ssh.key_filename,
+        password=password,
+        refresh_interval=refresh_interval,
+        log_lines=log_lines,
+        command_timeout=command_timeout,
+        action_timeout=action_timeout,
+    )
+    app.run()
+
+
+# ---------------------------------------------------------------------------
 # CLI root group
 # ---------------------------------------------------------------------------
 
@@ -1633,6 +1697,7 @@ cli.add_command(caddy, name="caddy")
 cli.add_command(docker_push, name="docker-push")
 cli.add_command(proxy, name="proxy")
 cli.add_command(service, name="service")
+cli.add_command(monitor)
 
 
 if __name__ == "__main__":

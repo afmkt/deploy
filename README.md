@@ -75,6 +75,7 @@ docker-push
 proxy
 service
 caddy
+monitor
 show-config
 clear-config
 ```
@@ -245,6 +246,37 @@ Check status:
 ```sh
 python main.py service status --host <host> --username <user> --key <ssh_key>
 ```
+
+## Monitor TUI
+
+Run the long-running operations monitor:
+
+```sh
+python main.py monitor --use-config
+```
+
+Useful options:
+
+- `--refresh-interval <seconds>`: polling interval (default `5`)
+- `--log-lines <count>`: lines fetched for log actions (default `120`)
+- `--command-timeout <seconds>`: SSH timeout per remote command (default `10`)
+- `--action-timeout <seconds>`: overall timeout per monitor action (default `15`)
+
+Keybindings:
+
+- `r`: refresh now
+- `u`: proxy up
+- `d`: proxy down
+- `s`: start selected service
+- `x`: stop selected service
+- `t`: restart selected service
+- `n`: create Docker network
+- `l`: fetch logs for selected service (or proxy if no service is selected)
+- `c`: request cancellation of in-progress action
+- `q`: quit
+
+The monitor is intentionally lightweight: it is not an orchestrator and does not
+attempt Kubernetes-style reconciliation.
 
 ## Configuration
 

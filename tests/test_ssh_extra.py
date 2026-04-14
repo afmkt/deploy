@@ -85,3 +85,48 @@ def test_ssh_context_manager(monkeypatch):
     with ssh:
         pass
     assert ssh.closed
+
+
+def test_ssh_execute_uses_default_command_timeout(monkeypatch):
+    ssh = SSHConnection(host="localhost", port=22, username="user", command_timeout=9)
+
+    class DummyStdout:
+        def __init__(self):
+            self.channel = self
+
+        def settimeout(self, timeout):
+            self.timeout = timeout
+
+        def recv_exit_status(self):
+            return 0
+
+        def read(self):
+            return b"ok"
+
+    class DummyStderr(DummyStdout):
+        def read(self):
+            return b""
+
+    class DummyClient:
+        def exec_command(self, command, timeout=None):
+            self.timeout = timeout
+            return None, DummyStdout(), DummyStderr()
+
+    ssh.client = DummyClient()
+    code, out, err = ssh.execute("echo ok")
+    assert code == 0
+    assert out == "ok"
+    assert ssh.client.timeout == 9
+
+
+def test_ssh_execute_timeout_returns_error(monkeypatch):
+    ssh = SSHConnection(host="localhost", port=22, username="user", command_timeout=3)
+
+    class DummyClient:
+        def exec_command(self, command, timeout=None):
+            raise socket.timeout("timed out")
+
+    ssh.client = DummyClient()
+    code, out, err = ssh.execute("sleep 10")
+    assert code == -1
+    assert "timed out" in err.lower()

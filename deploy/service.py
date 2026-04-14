@@ -170,6 +170,33 @@ class ServiceManager:
         console.print(f"[green]✓ Service '{service_name}' stopped[/green]")
         return True
 
+    def restart(self, service_name: str) -> bool:
+        """Restart a running service container by name."""
+        exit_code, _, stderr = self.ssh.execute(
+            f"docker restart {self._q(service_name)} >/dev/null 2>&1"
+        )
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to restart service '{service_name}': {stderr.strip()}[/red]")
+            return False
+        console.print(f"[green]✓ Service '{service_name}' restarted[/green]")
+        return True
+
+    def get_logs(self, service_name: str, lines: int = 80) -> str:
+        """Return recent logs for the service container."""
+        _, stdout, _ = self.ssh.execute(
+            f"docker logs --tail {lines} {self._q(service_name)} 2>&1"
+        )
+        return stdout
+
+    def list_services(self) -> list[str]:
+        """List known service names from the remote service directory."""
+        exit_code, stdout, _ = self.ssh.execute(
+            f"find {self._q(self.remote_base)} -mindepth 1 -maxdepth 1 -type d -exec basename {{}} ';' 2>/dev/null"
+        )
+        if exit_code != 0:
+            return []
+        return [line.strip() for line in stdout.splitlines() if line.strip()]
+
     def get_status(self, service_name: str) -> Optional[str]:
         """Return the running state of the service container, or None."""
         exit_code, stdout, _ = self.ssh.execute(

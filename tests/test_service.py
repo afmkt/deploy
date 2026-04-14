@@ -234,3 +234,33 @@ def test_get_container_ip_found():
 def test_get_container_ip_not_found():
     ssh = DummySSH(responses=[(1, "", "No such object")])
     assert ServiceManager(ssh).get_container_ip("mysvc") is None
+
+
+def test_restart_success():
+    ssh = DummySSH(responses=[(0, "", "")])
+    assert ServiceManager(ssh).restart("mysvc") is True
+    assert "docker restart" in ssh.executed[0]
+
+
+def test_restart_failure():
+    ssh = DummySSH(responses=[(1, "", "error")])
+    assert ServiceManager(ssh).restart("mysvc") is False
+
+
+def test_get_logs():
+    ssh = DummySSH(responses=[(0, "hello\n", "")])
+    logs = ServiceManager(ssh).get_logs("mysvc", lines=15)
+    assert logs == "hello\n"
+    assert "--tail 15" in ssh.executed[0]
+
+
+def test_list_services_success():
+    ssh = DummySSH(responses=[(0, "api\nworker\n", "")])
+    names = ServiceManager(ssh).list_services()
+    assert names == ["api", "worker"]
+
+
+def test_list_services_failure():
+    ssh = DummySSH(responses=[(1, "", "permission denied")])
+    names = ServiceManager(ssh).list_services()
+    assert names == []

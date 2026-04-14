@@ -62,6 +62,7 @@ def render_service_compose(
     port: int,
     image: Optional[str] = None,
     build: bool = True,
+    ingress_network: str = INGRESS_NETWORK,
 ) -> str:
     """Return a docker-compose.yml for a single FastAPI service.
 
@@ -69,32 +70,30 @@ def render_service_compose(
     The image is built locally by default; pass image= to use a pre-built image
     instead of a build directive.
     """
-    if image:
-        source_block = f"    image: {image}"
-    else:
-        source_block = "    build: ."
+    source_line = f"    image: {image}" if image else "    build: ."
 
-    return textwrap.dedent(f"""\
-        version: "3.8"
-
-        services:
-          {service_name}:
-        {textwrap.indent(source_block, "    ")}
-            container_name: {service_name}
-            expose:
-              - "{port}"
-            networks:
-              - ingress
-            labels:
-              caddy: {domain}
-              caddy.reverse_proxy: "{{{{upstreams {port}}}}}"
-            restart: unless-stopped
-
-        networks:
-          ingress:
-            external: true
-            name: {INGRESS_NETWORK}
-    """)
+    lines = [
+        'version: "3.8"',
+        "",
+        "services:",
+        f"  {service_name}:",
+        source_line,
+        f"    container_name: {service_name}",
+        "    expose:",
+        f'      - "{port}"',
+        "    networks:",
+        "      - ingress_net",
+        "    labels:",
+        f"      caddy: {domain}",
+        f'      caddy.reverse_proxy: "{{{{upstreams {port}}}}}"',
+        "    restart: unless-stopped",
+        "",
+        "networks:",
+        "  ingress_net:",
+        "    external: true",
+        f"    name: {ingress_network}",
+    ]
+    return "\n".join(lines) + "\n"
 
 
 class ServiceManager:

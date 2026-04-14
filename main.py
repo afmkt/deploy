@@ -12,7 +12,12 @@ from deploy.ssh import SSHConnection
 from deploy.remote import RemoteServer
 from deploy.caddy import CaddyManager
 from deploy.docker import DockerManager, _safe_image_filename
-from deploy.proxy import ProxyManager, PROXY_IMAGE
+from deploy.proxy import (
+    ProxyManager,
+    PROXY_IMAGE,
+    INGRESS_NETWORK,
+    normalize_ingress_networks,
+)
 from deploy.service import (
     ServiceManager,
     detect_fastapi_entrypoint,
@@ -1088,17 +1093,21 @@ def proxy():
               help="Load SSH args from saved config")
 @click.option("--migrate-native-caddy/--no-migrate-native-caddy", default=True,
               help="If native Caddy exists, migrate its Caddyfile and stop it before proxy start")
-def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy):
+@click.option("--ingress-network", "ingress_networks", multiple=True,
+              help="Ingress networks for proxy/service discovery (repeat flag or use comma-separated values)")
+def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy, ingress_networks):
     """Start (or ensure running) the caddy-docker-proxy ingress stack."""
     config = DeployConfig()
     ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    networks = normalize_ingress_networks(ingress_networks)
     if not ssh.host or not ssh.username:
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
     console.print(Panel.fit(
         "[bold blue]Proxy — up[/bold blue]\n"
-        f"Ingress: {PROXY_IMAGE}",
+        f"Ingress: {PROXY_IMAGE}\n"
+        f"Networks: {', '.join(networks)}",
         border_style="blue",
     ))
 
@@ -1130,7 +1139,7 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
 
         # Step 1: ensure network
         console.print("\n[bold]Step 1: Ensure ingress network[/bold]")
-        if not mgr.ensure_network():
+        if not mgr.ensure_networks(networks):
             sys.exit(1)
 
         # Step 2: check image availability
@@ -1206,7 +1215,7 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
 
         # Step 4: deploy compose file
         console.print("\n[bold]Step 4: Deploy ingress compose file[/bold]")
-        if not mgr.deploy_compose_file():
+        if not mgr.deploy_compose_file(networks):
             sys.exit(1)
 
         # Step 5: stop native Caddy before binding 80/443
@@ -1399,9 +1408,11 @@ def service():
 @click.option("--port", type=int, help="App port inside container (auto-detected for FastAPI)")
 @click.option("--image", "-i",
               help="Use a pre-built image instead of a build directive")
+@click.option("--ingress-network", default=INGRESS_NETWORK,
+              help="External Docker network used for ingress routing")
 @click.option("--force", is_flag=True,
               help="Overwrite existing Dockerfile / docker-compose.yml")
-def service_init(domain, name, port, image, force):
+def service_init(domain, name, port, image, ingress_network, force):
     """Scaffold Dockerfile and docker-compose.yml for a FastAPI service.
 
     Run inside the project directory.  Detects FastAPI entrypoint automatically.
@@ -1440,6 +1451,7 @@ def service_init(domain, name, port, image, force):
             domain=domain,
             port=effective_port,
             image=image,
+            ingress_network=ingress_network,
         )
         compose_path.write_text(compose_content)
         console.print(f"[green]✓ Wrote {compose_path}[/green]")
@@ -1456,6 +1468,8 @@ def service_init(domain, name, port, image, force):
               help="Public domain / hostname")
 @click.option("--port", type=int, default=8000,
               help="App port inside the container")
+@click.option("--ingress-network", default=INGRESS_NETWORK,
+              help="External Docker network used for ingress routing")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -1463,7 +1477,7 @@ def service_init(domain, name, port, image, force):
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-def service_deploy(name, image, domain, port, host, ssh_port, username, key,
+def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, username, key,
                    password, use_config):
     """Deploy a service image to the remote server and register with ingress.
 
@@ -1480,7 +1494,8 @@ def service_deploy(name, image, domain, port, host, ssh_port, username, key,
 
     console.print(Panel.fit(
         f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
-        f"Image: {image}  Domain: {domain}  Port: {port}",
+        f"Image: {image}  Domain: {domain}  Port: {port}\n"
+        f"Ingress network: {ingress_network}",
         border_style="blue",
     ))
 
@@ -1543,6 +1558,7 @@ def service_deploy(name, image, domain, port, host, ssh_port, username, key,
             domain=domain,
             port=port,
             image=image,
+            ingress_network=ingress_network,
         )
         if not svc_mgr.upload_compose(service_name, compose_content):
             sys.exit(1)

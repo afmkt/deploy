@@ -138,6 +138,10 @@ Notes:
 
 The proxy stack uses `lucaslorentz/caddy-docker-proxy`.
 
+By default, proxy and services use one external Docker network: `ingress`.
+For shared hosts running multiple applications, you can attach the proxy to multiple
+networks and keep each application isolated on its own network.
+
 Commands:
 
 ```sh
@@ -146,6 +150,25 @@ python main.py proxy status --use-config
 python main.py proxy logs --use-config --lines 120
 python main.py proxy diagnose --use-config
 python main.py proxy down --use-config
+```
+
+Useful option:
+
+- `--ingress-network <name>`: Attach proxy to one or more external networks. Repeat the option or use comma-separated values.
+
+Examples:
+
+```sh
+# Default single-network behavior (ingress)
+python main.py proxy up --use-config
+
+# Attach proxy to multiple app networks
+python main.py proxy up --use-config \
+	--ingress-network app-a \
+	--ingress-network app-b
+
+# Equivalent comma-separated form
+python main.py proxy up --use-config --ingress-network app-a,app-b
 ```
 
 ### Native Caddy Migration Behavior
@@ -173,6 +196,16 @@ Run inside your service directory:
 python main.py service init -d api.example.com
 ```
 
+Useful option:
+
+- `--ingress-network <name>`: External network that this service joins for caddy routing (default: `ingress`).
+
+Example with isolated app network:
+
+```sh
+python main.py service init -d api.example.com --ingress-network app-a
+```
+
 This generates:
 
 - `Dockerfile`
@@ -182,6 +215,29 @@ This generates:
 
 ```sh
 python main.py service deploy -i <image:tag> -d api.example.com --host <host> --username <user> --key <ssh_key>
+```
+
+Useful option:
+
+- `--ingress-network <name>`: Use the same network name configured in `proxy up`.
+
+Example with isolated app network:
+
+```sh
+python main.py service deploy -i <image:tag> -d api.example.com \
+	--ingress-network app-a \
+	--host <host> --username <user> --key <ssh_key>
+```
+
+Recommended shared-host pattern:
+
+1. Start proxy once with all application networks.
+2. Deploy each application service with its own `--ingress-network` value.
+
+```sh
+python main.py proxy up --use-config --ingress-network app-a --ingress-network app-b
+python main.py service deploy -n app-a -i <image:a> -d a.example.com --ingress-network app-a --host <host> --username <user> --key <ssh_key>
+python main.py service deploy -n app-b -i <image:b> -d b.example.com --ingress-network app-b --host <host> --username <user> --key <ssh_key>
 ```
 
 Check status:

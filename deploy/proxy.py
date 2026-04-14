@@ -3,7 +3,7 @@
 import re
 import shlex
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from rich.console import Console
 
@@ -20,11 +20,75 @@ PROXY_BOOTSTRAP_CADDYFILE_REMOTE = "/opt/caddy-proxy/Caddyfile"
 PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE = "/opt/caddy-proxy/Caddyfile.native.backup"
 PROXY_HOST_GATEWAY_NAME = "host.docker.internal"
 PROXY_AUTOSAVE_CADDYFILE_REMOTE = "/config/caddy/Caddyfile.autosave"
-PROXY_COMPOSE_LOCAL_TEMPLATE = Path(__file__).parent / "templates" / "proxy_compose.yml"
 
 # Caddy persistent storage on the remote host
 CADDY_DATA_VOLUME = "caddy_data"
 CADDY_CONFIG_VOLUME = "caddy_config"
+
+
+def normalize_ingress_networks(ingress_networks: Optional[Sequence[str]] = None) -> list[str]:
+    """Normalize ingress network names from CLI/config input.
+
+    Supports repeated values and comma-separated values. Empty tokens are ignored.
+    """
+    if not ingress_networks:
+        return [INGRESS_NETWORK]
+
+    normalized: list[str] = []
+    for value in ingress_networks:
+        for item in value.split(","):
+            network = item.strip()
+            if network and network not in normalized:
+                normalized.append(network)
+
+    return normalized or [INGRESS_NETWORK]
+
+
+def render_proxy_compose(ingress_networks: Optional[Sequence[str]] = None) -> str:
+    """Render docker-compose.yml content for caddy-docker-proxy."""
+    networks = normalize_ingress_networks(ingress_networks)
+    ingress_list = ",".join(networks)
+
+    lines = [
+        "services:",
+        "  caddy-proxy:",
+        f"    image: {PROXY_IMAGE}",
+        f"    container_name: {PROXY_CONTAINER}",
+        "    ports:",
+        '      - "80:80"',
+        '      - "443:443"',
+        "    extra_hosts:",
+        f'      - "{PROXY_HOST_GATEWAY_NAME}:host-gateway"',
+        "    volumes:",
+        "      - /var/run/docker.sock:/var/run/docker.sock:ro",
+        f"      - {CADDY_DATA_VOLUME}:/data",
+        f"      - {CADDY_CONFIG_VOLUME}:/config",
+        f"      - {PROXY_BOOTSTRAP_CADDYFILE_REMOTE}:/etc/caddy/Caddyfile:ro",
+        "    networks:",
+    ]
+    lines.extend(f"      - {name}" for name in networks)
+    lines.extend([
+        "    restart: unless-stopped",
+        "    environment:",
+        f"      - CADDY_INGRESS_NETWORKS={ingress_list}",
+        "      - CADDY_DOCKER_CADDYFILE_PATH=/etc/caddy/Caddyfile",
+        "",
+        "volumes:",
+        f"  {CADDY_DATA_VOLUME}:",
+        f"    name: {CADDY_DATA_VOLUME}",
+        f"  {CADDY_CONFIG_VOLUME}:",
+        f"    name: {CADDY_CONFIG_VOLUME}",
+        "",
+        "networks:",
+    ])
+    for name in networks:
+        lines.extend([
+            f"  {name}:",
+            "    external: true",
+            f"    name: {name}",
+        ])
+
+    return "\n".join(lines) + "\n"
 
 
 class ProxyManager:
@@ -63,6 +127,13 @@ class ProxyManager:
         console.print(f"[green]✓ Created network '{name}'[/green]")
         return True
 
+    def ensure_networks(self, names: Optional[Sequence[str]] = None) -> bool:
+        """Ensure all required ingress networks exist."""
+        for name in normalize_ingress_networks(names):
+            if not self.ensure_network(name):
+                return False
+        return True
+
     # ------------------------------------------------------------------
     # Image availability
     # ------------------------------------------------------------------
@@ -78,13 +149,13 @@ class ProxyManager:
     # Compose file deployment
     # ------------------------------------------------------------------
 
-    def _render_compose(self) -> str:
+    def _render_compose(self, ingress_networks: Optional[Sequence[str]] = None) -> str:
         """Return rendered ingress compose YAML."""
-        return PROXY_COMPOSE_LOCAL_TEMPLATE.read_text()
+        return render_proxy_compose(ingress_networks)
 
-    def deploy_compose_file(self) -> bool:
+    def deploy_compose_file(self, ingress_networks: Optional[Sequence[str]] = None) -> bool:
         """Upload the ingress proxy docker-compose.yml to the remote host."""
-        compose_content = self._render_compose()
+        compose_content = self._render_compose(ingress_networks)
         remote_dir = str(Path(PROXY_COMPOSE_REMOTE).parent)
 
         # Create remote directory

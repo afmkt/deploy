@@ -115,6 +115,17 @@ def test_render_service_compose_external_network():
     assert f"name: {INGRESS_NETWORK}" in compose
 
 
+def test_render_service_compose_custom_ingress_network():
+    compose = render_service_compose(
+        "mysvc",
+        "api.example.com",
+        8000,
+        ingress_network="app-alpha-net",
+    )
+    assert "name: app-alpha-net" in compose
+    assert "- ingress_net" in compose
+
+
 # ---------------------------------------------------------------------------
 # ServiceManager.image_exists_remote
 # ---------------------------------------------------------------------------

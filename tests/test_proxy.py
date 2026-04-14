@@ -3,6 +3,8 @@
 import pytest
 from deploy.proxy import (
     ProxyManager,
+    normalize_ingress_networks,
+    render_proxy_compose,
     PROXY_HOST_GATEWAY_NAME,
     PROXY_IMAGE,
     INGRESS_NETWORK,
@@ -28,6 +30,27 @@ class DummySSH:
         if self._responses:
             return self._responses.pop(0)
         return (0, "", "")
+
+
+# ---------------------------------------------------------------------------
+# network normalization / rendering
+# ---------------------------------------------------------------------------
+
+def test_normalize_ingress_networks_default():
+    assert normalize_ingress_networks() == [INGRESS_NETWORK]
+
+
+def test_normalize_ingress_networks_dedup_and_split_csv():
+    networks = normalize_ingress_networks(["ingress, app-a", "app-b", "app-a"])
+    assert networks == ["ingress", "app-a", "app-b"]
+
+
+def test_render_proxy_compose_multiple_networks():
+    compose = render_proxy_compose(["ingress", "app-a"])
+    assert "CADDY_INGRESS_NETWORKS=ingress,app-a" in compose
+    assert "networks:\n      - ingress\n      - app-a" in compose
+    assert "  ingress:\n    external: true\n    name: ingress" in compose
+    assert "  app-a:\n    external: true\n    name: app-a" in compose
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +99,20 @@ def test_ensure_network_create_fails():
     assert result is False
 
 
+def test_ensure_networks_multiple_names():
+    # ingress exists, app-a missing then created
+    ssh = DummySSH(
+        responses=[
+            (0, "yes\n", ""),
+            (0, "no\n", ""),
+            (0, "app-a-id\n", ""),
+        ]
+    )
+    mgr = ProxyManager(ssh)
+    assert mgr.ensure_networks(["ingress", "app-a"]) is True
+    assert any("network create" in cmd and "app-a" in cmd for cmd in ssh.executed)
+
+
 # ---------------------------------------------------------------------------
 # proxy_image_exists_remote
 # ---------------------------------------------------------------------------
@@ -103,6 +140,14 @@ def test_deploy_compose_file_success():
     assert len(ssh.executed) == 2
     assert "mkdir" in ssh.executed[0]
     assert PROXY_COMPOSE_REMOTE in ssh.executed[1]
+
+
+def test_deploy_compose_file_with_multiple_networks_renders_env():
+    ssh = DummySSH(responses=[(0, "", ""), (0, "", "")])
+    mgr = ProxyManager(ssh)
+    result = mgr.deploy_compose_file(["ingress", "app-a"])
+    assert result is True
+    assert "CADDY_INGRESS_NETWORKS=ingress,app-a" in ssh.executed[1]
 
 
 def test_deploy_compose_file_mkdir_fails():

@@ -1,205 +1,201 @@
-🚀 Git SSH Deploy Tool
+## Git SSH Deploy Tool
 
-A lightweight CLI tool to sync a local Git repository to a remote server over SSH.
-It automates repository setup, remote configuration, and deployment in a single command.
+CLI toolkit for remote deployment over SSH. It combines Git sync, Docker image transfer, reverse proxy migration/management, and service scaffolding/deploy commands.
 
+## Current Status
 
-✨ Features
-Validate local Git repository
-Connect to remote server via SSH
-Automatically create remote directories
-Initialize a bare Git repository on the server
-Add remote to local repository
-Push local code to remote
-Clone or update working directory on server
-Idempotent (safe to run multiple times)
+- Git push/pull workflows are stable.
+- Docker image transfer (`docker-push`) supports remote architecture targeting.
+- `proxy` command group manages `lucaslorentz/caddy-docker-proxy`.
+- Native Caddy migration is supported.
+- Proxy operation is bridge-mode only.
+- `service` command group can scaffold and deploy FastAPI-style Docker services.
 
+## Requirements
 
-🧰 Tech Stack
-Python 3
-CLI: click
-TUI: rich
-SSH: paramiko
-Git: system git (via subprocess)
-Packaging: pyinstaller
+- Python 3.12+
+- Docker available locally (for `docker-push`)
+- Docker available on remote host
+- SSH access to remote host
+- Local virtual environment (recommended):
 
-## 🚦 Usage
+```sh
+source .venv/bin/activate
+```
 
-### 1. Build the Executable
+## Install and Run
 
-To build the standalone `deploy` executable, run:
+Run directly:
+
+```sh
+python main.py --help
+```
+
+Build standalone binary:
 
 ```sh
 ./scripts/build.sh
 ```
 
-The executable will be created in the `dist/` directory as `dist/deploy`.
+Binary output:
 
-### 2. Run the Deploy Tool
+```text
+dist/deploy
+```
 
-You can now use the tool directly:
+## Top-Level Commands
+
+```text
+push
+pull
+docker-push
+proxy
+service
+caddy
+show-config
+clear-config
+```
+
+## Core Workflows
+
+### 1) Git Push to Remote
 
 ```sh
-./dist/deploy --repo-path . --host <remote_host> --username <user> --key <path_to_ssh_key> --deploy-path /var/repos
+python main.py push --host <host> --username <user> --key <ssh_key> --deploy-path /var/repos
 ```
 
-Or, for interactive mode (recommended):
+Use saved config on later runs:
 
 ```sh
-./dist/deploy
+python main.py push --use-config
 ```
 
-#### Options
-
-- `--repo-path`   : Path to your local Git repository (default: current directory)
-- `--host`        : Remote server hostname or IP
-- `--port`        : SSH port (default: 22)
-- `--username`    : SSH username
-- `--key`         : Path to SSH private key
-- `--password`    : SSH password (not recommended; use key if possible)
-- `--deploy-path` : Path on remote server for deployment (default: /var/repos)
-- `--interactive/--no-interactive` : Enable/disable interactive prompts (default: interactive)
-- `--use-config/--no-use-config` : Load arguments from saved config file (default: no)
-- `--dry-run`     : Validate connection and arguments without performing actual push/pull
-
-#### Example
+### 2) Git Pull from Remote
 
 ```sh
-./dist/deploy --repo-path . --host example.com --username alice --key ~/.ssh/id_ed25519 --deploy-path /var/repos
+python main.py pull --host <host> --username <user> --key <ssh_key> --deploy-path /var/repos
 ```
 
-#### After Deployment
+Useful options:
 
-- Add the provided remote URL to your local repo:
-  ```sh
-  git remote add deploy <bare_repo_url>
-  git push deploy main
-  ```
+- `--branch <name>`: Pull into a specific local branch.
+- `--commit`: If the remote working directory has uncommitted changes, commit them on the remote before pulling.
+- `--sync-remote`: Sync remote working directory changes back through the remote bare repository before pulling locally. Use this when the server may contain edits that do not yet exist in your local repository.
 
-
-# Common usage patterns
-
-
-## PUSH: Sync Local Repo to Remote
-
-To push (sync) your local repository to the remote server:
-
-1. Make sure you have added the remote (if not already):
-  ```sh
-  git remote add deploy <bare_repo_url>
-  # Or update if it already exists:
-  git remote set-url deploy <bare_repo_url>
-  ```
-2. Push your local branch to the remote:
-  ```sh
-  git push deploy main  # or your branch name
-  ```
-3. (Optional) Use the deploy tool to automate setup and push:
-  ```sh
-  ./dist/deploy --repo-path . --host <remote_host> --username <user> --key <path_to_ssh_key> --deploy-path /var/repos
-  ```
-
-This will sync your local changes to the remote bare repository and update the working directory on the server.
-
-4. (Final Step) On the remote server, make sure the working directory is updated to the latest version:
-   - SSH into your remote server:
-     ```sh
-     ssh <user>@<remote_host>
-     cd <working_directory_path>
-     git fetch origin
-     git checkout main  # or your branch name
-     git pull origin main  # or your branch name
-     ```
-   - If the checkout or pull fails, check the error message and resolve any issues (e.g., missing branch, permissions, or repo not initialized). Report the error if you cannot resolve it.
-```
-
-
-## PULL: Sync Remote Repo to Local
-
-To pull (sync) changes from the remote server to your local repository:
+Examples:
 
 ```sh
-./dist/deploy pull --repo-path . --host <remote_host> --username <user> --key <path_to_ssh_key> --deploy-path /var/repos
+# Pull into a specific branch
+python main.py pull --branch feature-x
+
+# Commit remote working tree changes before pulling
+python main.py pull --commit
+
+# Fully sync remote working tree -> bare repo -> local repo
+python main.py pull --sync-remote
 ```
 
-Or, for interactive mode (recommended):
+### 3) Push Docker Image to Remote
 
 ```sh
-./dist/deploy pull
+python main.py docker-push -i <image:tag> --host <host> --username <user> --key <ssh_key>
 ```
 
-The pull command will:
-1. Validate the local repository
-2. Connect to the remote server
-3. Check if the bare repository exists
-4. Pull changes from the remote bare repository to your local repository
+Notes:
 
-### Optional Enhancements
+- Detects remote architecture and pulls/saves an appropriate image variant.
+- Transfers tarball via SFTP and loads image on remote host.
 
-- `--commit` : Commit changes in remote working directory before pulling
-- `--sync-remote` : Check if remote working dir is clean, commit changes, push to bare repo, then pull
-- `--branch` : Specify branch name to pull to
-- `--dry-run` : Validate connection and arguments without performing actual pull
+## Proxy Management (Bridge Mode)
 
-### Example with Options
+The proxy stack uses `lucaslorentz/caddy-docker-proxy`.
+
+Commands:
 
 ```sh
-# Sync remote working directory and then pull
-./dist/deploy pull --sync-remote
-
-# Commit remote changes and then pull
-./dist/deploy pull --commit
-
-# Pull to a specific branch
-./dist/deploy pull --branch feature-branch
-
-# Dry run to validate connection
-./dist/deploy pull --dry-run
+python main.py proxy up --use-config
+python main.py proxy status --use-config
+python main.py proxy logs --use-config --lines 120
+python main.py proxy diagnose --use-config
+python main.py proxy down --use-config
 ```
 
-## Configuration Management
+### Native Caddy Migration Behavior
 
-The deploy tool automatically saves your latest arguments to a config file (`~/.deploy/config.json`) after each successful run. This allows you to reuse previous settings without retyping them.
+When `proxy up` detects native Caddy and migration is enabled:
 
-### Using Saved Configuration
+1. Reads native Caddyfile.
+2. Backs it up to `/opt/caddy-proxy/Caddyfile.native.backup`.
+3. Rewrites loopback upstreams (`localhost`, `127.0.0.1`, `127.0.1.1`, `[::1]`) to a bridge-reachable host address.
+4. Writes bootstrap file `/opt/caddy-proxy/Caddyfile`.
+5. Stops native Caddy service.
+6. Starts docker-caddy-proxy.
 
-To load arguments from the saved config file:
+### Bridge Mode Prerequisite
+
+If old native services are proxied through rewritten host addresses, those services must listen on a non-loopback interface (for example `0.0.0.0:<port>`). Loopback-only listeners cannot be reached from a bridge network container.
+
+## Service Commands
+
+### Scaffold Service Files
+
+Run inside your service directory:
 
 ```sh
-./dist/deploy --use-config
+python main.py service init -d api.example.com
 ```
 
-Or for the pull command:
+This generates:
+
+- `Dockerfile`
+- `docker-compose.yml`
+
+### Deploy Service to Remote
 
 ```sh
-./dist/deploy pull --use-config
+python main.py service deploy -i <image:tag> -d api.example.com --host <host> --username <user> --key <ssh_key>
 ```
 
-CLI arguments will override saved config values when both are provided.
-
-### Viewing Saved Configuration
-
-To see all saved configuration:
+Check status:
 
 ```sh
-./dist/deploy show-config
+python main.py service status --host <host> --username <user> --key <ssh_key>
 ```
 
-### Clearing Saved Configuration
+## Configuration
 
-To clear all saved configuration:
+Saved config file:
+
+```text
+~/.deploy/config.json
+```
+
+Show saved config:
 
 ```sh
-./dist/deploy clear-config
+python main.py show-config
 ```
 
-To clear configuration for a specific command only:
+Clear all config:
 
 ```sh
-./dist/deploy clear-config --command push
-./dist/deploy clear-config --command pull
+python main.py clear-config
 ```
 
-### Config File Location
+Clear one section:
 
-The config file is stored at `~/.deploy/config.json`. Note that passwords are never saved to the config file for security reasons.
+```sh
+python main.py clear-config --command push
+python main.py clear-config --command pull
+python main.py clear-config --command proxy
+python main.py clear-config --command service
+```
+
+Notes:
+
+- CLI args override saved config values.
+- Passwords are not persisted.
+
+## Legacy Command Group
+
+`caddy` command group is still available for direct native Caddy management/import/apply flows, but current proxy-first workflows should prefer `proxy` + `service`.

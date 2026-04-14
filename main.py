@@ -1,6 +1,7 @@
 """Git SSH Deploy Tool - Main CLI entry point."""
 
 import sys
+from pathlib import Path
 import click
 from rich.console import Console
 from rich.panel import Panel
@@ -11,6 +12,13 @@ from deploy.ssh import SSHConnection
 from deploy.remote import RemoteServer
 from deploy.caddy import CaddyManager
 from deploy.docker import DockerManager, _safe_image_filename
+from deploy.proxy import ProxyManager, PROXY_IMAGE
+from deploy.service import (
+    ServiceManager,
+    detect_fastapi_entrypoint,
+    render_dockerfile,
+    render_service_compose,
+)
 from deploy.config import DeployConfig
 from deploy.utils import (
     prompt_connection_details,
@@ -1038,6 +1046,561 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
         ssh.disconnect()
 
 
+# ---------------------------------------------------------------------------
+# proxy subcommand group
+# ---------------------------------------------------------------------------
+
+def _build_ssh_from_config(config: DeployConfig, section: str,
+                           host: str, port: int, username: str,
+                           key: str, password: str) -> SSHConnection:
+    """Return an SSHConnection, loading missing fields from saved config."""
+    if not host or not username or not key:
+        saved = config.load_args(section)
+        fallback_sources = ["push", "pull", "caddy", "docker-push"]
+        if not saved.get("host") or not saved.get("username") or not saved.get("key"):
+            for src in fallback_sources:
+                candidate = config.load_args(src)
+                if candidate.get("host") and candidate.get("username") and candidate.get("key"):
+                    saved = candidate
+                    break
+        host = host or saved.get("host", "")
+        port = port if port != 22 else saved.get("port", 22)
+        username = username or saved.get("username", "")
+        key = key or saved.get("key", "")
+    return SSHConnection(host=host, port=port, username=username,
+                         password=password, key_filename=key)
+
+
+@click.group()
+def proxy():
+    """Manage the caddy-docker-proxy ingress container on the remote server."""
+    pass
+
+
+@proxy.command(name="up")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--migrate-native-caddy/--no-migrate-native-caddy", default=True,
+              help="If native Caddy exists, migrate its Caddyfile and stop it before proxy start")
+def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy):
+    """Start (or ensure running) the caddy-docker-proxy ingress stack."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    console.print(Panel.fit(
+        "[bold blue]Proxy — up[/bold blue]\n"
+        f"Ingress: {PROXY_IMAGE}",
+        border_style="blue",
+    ))
+
+    if not ssh.connect():
+        sys.exit(1)
+
+    try:
+        mgr = ProxyManager(ssh)
+        from rich.prompt import Confirm
+
+        native_caddy_found = False
+        native_caddy_content = None
+        should_migrate_native_caddy = False
+
+        # Step 0: detect native Caddy
+        console.print("\n[bold]Step 0: Check native Caddy[/bold]")
+        native_caddy_found = mgr.native_caddy_exists()
+        if native_caddy_found:
+            console.print("[yellow]⚠ Native Caddy detected on remote host[/yellow]")
+            if migrate_native_caddy:
+                should_migrate_native_caddy = Confirm.ask(
+                    "Migrate native Caddy config and hand over ports 80/443 to docker-caddy-proxy?",
+                    default=True,
+                )
+            else:
+                console.print("[yellow]Native Caddy migration is disabled by flag[/yellow]")
+        else:
+            console.print("[dim]No native Caddy detected[/dim]")
+
+        # Step 1: ensure network
+        console.print("\n[bold]Step 1: Ensure ingress network[/bold]")
+        if not mgr.ensure_network():
+            sys.exit(1)
+
+        # Step 2: check image availability
+        console.print("\n[bold]Step 2: Check proxy image[/bold]")
+        if not mgr.proxy_image_exists_remote():
+            console.print(f"[yellow]Image {PROXY_IMAGE} not found on remote.[/yellow]")
+            if Confirm.ask(
+                f"Push {PROXY_IMAGE} to remote now using docker-push?",
+                default=True,
+            ):
+                from click.testing import CliRunner
+                runner = CliRunner()
+                result = runner.invoke(docker_push, [
+                    "--image", PROXY_IMAGE,
+                    "--host", ssh.host,
+                    "--port", str(ssh.port),
+                    "--username", ssh.username,
+                    "--no-interactive",
+                    *(["--key", ssh.key_filename] if ssh.key_filename else []),
+                ], catch_exceptions=False, standalone_mode=False)
+                if result.exit_code != 0:
+                    console.print("[red]✗ docker-push failed[/red]")
+                    sys.exit(1)
+            else:
+                console.print(
+                    f"[yellow]Run: deploy docker-push -i {PROXY_IMAGE} first[/yellow]"
+                )
+                sys.exit(1)
+
+        # Step 3: prepare migration bootstrap (if needed)
+        console.print("\n[bold]Step 3: Prepare bootstrap Caddyfile[/bold]")
+        if should_migrate_native_caddy:
+            native_caddy_content = mgr.read_native_caddyfile()
+            if native_caddy_content and native_caddy_content.strip():
+                native_config_path = mgr.get_native_caddyfile_path()
+                console.print(f"[green]✓ Native Caddyfile found at {native_config_path}[/green]")
+                if not mgr.backup_native_caddyfile(native_caddy_content):
+                    sys.exit(1)
+
+                if mgr.native_config_uses_loopback_upstreams(native_caddy_content):
+                    console.print(
+                        "[yellow]Detected localhost loopback upstreams. "
+                        "Rewriting upstreams to the host-side bridge address for bridge-mode compatibility.[/yellow]"
+                    )
+                    rewritten_caddy_content = mgr.rewrite_native_caddyfile_for_bridge_mode(
+                        native_caddy_content
+                    )
+                    native_caddy_content = rewritten_caddy_content
+                else:
+                    rewritten_caddy_content = mgr.rewrite_native_caddyfile_for_bridge_mode(
+                        native_caddy_content
+                    )
+                    if rewritten_caddy_content != native_caddy_content:
+                        console.print(
+                            "[yellow]Rewrote loopback upstreams for bridge-mode host reachability[/yellow]"
+                        )
+                    native_caddy_content = rewritten_caddy_content
+            else:
+                console.print(
+                    "[red]✗ Native Caddy was detected, but its config could not be read. "
+                    "Refusing to cut over with an empty bootstrap config.[/red]"
+                )
+                console.print(
+                    "[yellow]Check the native Caddy config path and rerun proxy up after fixing it.[/yellow]"
+                )
+                sys.exit(1)
+        else:
+            # Always ensure the mounted bootstrap file exists.
+            native_caddy_content = ""
+
+        if not mgr.write_bootstrap_caddyfile(native_caddy_content):
+            sys.exit(1)
+
+        # Step 4: deploy compose file
+        console.print("\n[bold]Step 4: Deploy ingress compose file[/bold]")
+        if not mgr.deploy_compose_file():
+            sys.exit(1)
+
+        # Step 5: stop native Caddy before binding 80/443
+        native_stopped = False
+        if should_migrate_native_caddy:
+            console.print("\n[bold]Step 5: Stop native Caddy[/bold]")
+            if not mgr.stop_native_caddy():
+                sys.exit(1)
+            native_stopped = True
+
+        # Step 6: bring up
+        console.print("\n[bold]Step 6: Start ingress proxy[/bold]")
+        if not mgr.up():
+            if native_stopped:
+                console.print("[yellow]Attempting rollback: restart native Caddy...[/yellow]")
+                if mgr.start_native_caddy():
+                    console.print("[yellow]Native Caddy restarted after proxy start failure[/yellow]")
+            sys.exit(1)
+
+        status = mgr.get_status()
+        console.print(f"\n[bold green]✓ Ingress proxy is {status}[/bold green]")
+        config.save_args({"host": ssh.host, "port": ssh.port,
+                          "username": ssh.username, "key": ssh.key_filename}, "proxy")
+    finally:
+        ssh.disconnect()
+
+
+@proxy.command(name="status")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+def proxy_status(host, port, username, key, password, use_config):
+    """Show the status of the caddy-docker-proxy container."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    if not ssh.connect():
+        sys.exit(1)
+    try:
+        mgr = ProxyManager(ssh)
+        status = mgr.get_status()
+        running = mgr.is_running()
+        if status:
+            colour = "green" if running else "yellow"
+            console.print(f"[{colour}]Ingress proxy: {status}[/{colour}]")
+        else:
+            console.print("[yellow]Ingress proxy container not found[/yellow]")
+            console.print("[dim]Run: deploy proxy up[/dim]")
+    finally:
+        ssh.disconnect()
+
+
+@proxy.command(name="down")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+def proxy_down(host, port, username, key, password, use_config):
+    """Stop the caddy-docker-proxy ingress stack."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    if not ssh.connect():
+        sys.exit(1)
+    try:
+        ProxyManager(ssh).down()
+    finally:
+        ssh.disconnect()
+
+
+@proxy.command(name="logs")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--lines", default=80, show_default=True,
+              help="How many proxy log lines to fetch")
+def proxy_logs(host, port, username, key, password, use_config, lines):
+    """Show recent docker-caddy-proxy container logs."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    if not ssh.connect():
+        sys.exit(1)
+    try:
+        logs = ProxyManager(ssh).get_proxy_logs(lines=lines)
+        if logs.strip():
+            console.print(logs.rstrip())
+        else:
+            console.print("[yellow]No proxy logs available[/yellow]")
+    finally:
+        ssh.disconnect()
+
+
+@proxy.command(name="diagnose")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--lines", default=80, show_default=True,
+              help="How many log/journal lines to fetch")
+def proxy_diagnose(host, port, username, key, password, use_config, lines):
+    """Collect proxy and native Caddy diagnostics from the remote server."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    if not ssh.connect():
+        sys.exit(1)
+
+    try:
+        mgr = ProxyManager(ssh)
+
+        console.print(Panel.fit(
+            "[bold blue]Proxy Diagnose[/bold blue]\n"
+            "Remote Caddy migration diagnostics",
+            border_style="blue",
+        ))
+
+        sections = [
+            ("Proxy Status", mgr.get_status() or "not found"),
+            ("Proxy Logs", mgr.get_proxy_logs(lines=lines).strip() or "<empty>"),
+            (
+                "Generated Caddyfile",
+                (mgr.get_generated_caddyfile() or "<unavailable>").strip(),
+            ),
+            (
+                "Bootstrap Caddyfile",
+                (mgr.get_bootstrap_caddyfile() or "<unavailable>").strip(),
+            ),
+            (
+                "Native Caddyfile Backup",
+                (mgr.get_native_caddyfile_backup() or "<unavailable>").strip(),
+            ),
+            (
+                "Native Caddy Status",
+                mgr.get_native_caddy_status().strip() or "<empty>",
+            ),
+            (
+                "Native Caddy Journal",
+                mgr.get_native_caddy_journal(lines=lines).strip() or "<empty>",
+            ),
+        ]
+
+        for title, content in sections:
+            console.print(f"\n[bold]{title}[/bold]")
+            console.print(content)
+    finally:
+        ssh.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# service subcommand group
+# ---------------------------------------------------------------------------
+
+@click.group()
+def service():
+    """Scaffold and deploy Docker-based services (FastAPI first-class)."""
+    pass
+
+
+@service.command(name="init")
+@click.option("--domain", "-d", required=True,
+              help="Public domain or hostname for this service (e.g. api.example.com)")
+@click.option("--name", "-n", help="Service name (defaults to current directory name)")
+@click.option("--port", type=int, help="App port inside container (auto-detected for FastAPI)")
+@click.option("--image", "-i",
+              help="Use a pre-built image instead of a build directive")
+@click.option("--force", is_flag=True,
+              help="Overwrite existing Dockerfile / docker-compose.yml")
+def service_init(domain, name, port, image, force):
+    """Scaffold Dockerfile and docker-compose.yml for a FastAPI service.
+
+    Run inside the project directory.  Detects FastAPI entrypoint automatically.
+    """
+    project_dir = Path(".")
+
+    # Derive service name from directory if not given
+    service_name = name or project_dir.resolve().name
+
+    # Detect FastAPI entrypoint
+    ep_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
+    effective_port = port or default_port
+
+    console.print(Panel.fit(
+        f"[bold blue]Service init — {service_name}[/bold blue]\n"
+        f"Domain: {domain}  Port: {effective_port}",
+        border_style="blue",
+    ))
+    console.print(f"[dim]Detected entrypoint: {ep_file} → {app_str}[/dim]")
+
+    # Dockerfile
+    dockerfile_path = project_dir / "Dockerfile"
+    if dockerfile_path.exists() and not force:
+        console.print("[dim]Dockerfile already exists, skipping (use --force to overwrite)[/dim]")
+    else:
+        dockerfile_path.write_text(render_dockerfile(app_str, effective_port))
+        console.print(f"[green]✓ Wrote {dockerfile_path}[/green]")
+
+    # docker-compose.yml
+    compose_path = project_dir / "docker-compose.yml"
+    if compose_path.exists() and not force:
+        console.print("[dim]docker-compose.yml already exists, skipping (use --force to overwrite)[/dim]")
+    else:
+        compose_content = render_service_compose(
+            service_name=service_name,
+            domain=domain,
+            port=effective_port,
+            image=image,
+        )
+        compose_path.write_text(compose_content)
+        console.print(f"[green]✓ Wrote {compose_path}[/green]")
+
+    console.print("\n[bold green]✓ Service initialised[/bold green]")
+    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
+
+
+@service.command(name="deploy")
+@click.option("--name", "-n", help="Service name (defaults to current directory name)")
+@click.option("--image", "-i", required=True,
+              help="Docker image to run (must be present on remote or pushed beforehand)")
+@click.option("--domain", "-d", required=True,
+              help="Public domain / hostname")
+@click.option("--port", type=int, default=8000,
+              help="App port inside the container")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--ssh-port", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+def service_deploy(name, image, domain, port, host, ssh_port, username, key,
+                   password, use_config):
+    """Deploy a service image to the remote server and register with ingress.
+
+    The image must already exist on the remote (use 'deploy docker-push' first),
+    or the command will prompt you to push it.
+    """
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "service", host, ssh_port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    service_name = name or Path(".").resolve().name
+
+    console.print(Panel.fit(
+        f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
+        f"Image: {image}  Domain: {domain}  Port: {port}",
+        border_style="blue",
+    ))
+
+    if not ssh.connect():
+        sys.exit(1)
+
+    try:
+        svc_mgr = ServiceManager(ssh)
+        proxy_mgr = ProxyManager(ssh)
+
+        # Step 1: check ingress proxy is running
+        console.print("\n[bold]Step 1: Check ingress proxy[/bold]")
+        if not proxy_mgr.is_running():
+            console.print("[yellow]⚠ Ingress proxy is not running[/yellow]")
+            console.print("[dim]Run: deploy proxy up[/dim]")
+            sys.exit(1)
+
+        # Step 2: check image availability on remote
+        console.print("\n[bold]Step 2: Check image on remote[/bold]")
+        if not svc_mgr.image_exists_remote(image):
+            console.print(f"[yellow]Image '{image}' not found on remote.[/yellow]")
+            from rich.prompt import Confirm
+            if Confirm.ask(
+                f"Push '{image}' to remote now using docker-push?",
+                default=True,
+            ):
+                from click.testing import CliRunner
+                runner = CliRunner()
+                result = runner.invoke(docker_push, [
+                    "--image", image,
+                    "--host", ssh.host,
+                    "--port", str(ssh.port),
+                    "--username", ssh.username,
+                    "--no-interactive",
+                    *(["--key", ssh.key_filename] if ssh.key_filename else []),
+                ], catch_exceptions=False, standalone_mode=False)
+                if result.exit_code != 0:
+                    console.print("[red]✗ docker-push failed[/red]")
+                    sys.exit(1)
+                # Reconnect: docker-push opens its own SSH session
+                ssh.disconnect()
+                if not ssh.connect():
+                    sys.exit(1)
+                svc_mgr = ServiceManager(ssh)
+                proxy_mgr = ProxyManager(ssh)
+            else:
+                console.print(
+                    f"[yellow]Run: deploy docker-push -i {image} --host {ssh.host} first[/yellow]"
+                )
+                sys.exit(1)
+        else:
+            console.print(f"[green]✓ Image '{image}' found on remote[/green]")
+
+        # Step 3: ensure service directory and compose file
+        console.print("\n[bold]Step 3: Upload service compose[/bold]")
+        if not svc_mgr.ensure_service_dir(service_name):
+            sys.exit(1)
+        compose_content = render_service_compose(
+            service_name=service_name,
+            domain=domain,
+            port=port,
+            image=image,
+        )
+        if not svc_mgr.upload_compose(service_name, compose_content):
+            sys.exit(1)
+
+        # Step 4: start service
+        console.print("\n[bold]Step 4: Start service[/bold]")
+        if not svc_mgr.compose_up(service_name):
+            sys.exit(1)
+
+        status = svc_mgr.get_status(service_name)
+        container_ip = svc_mgr.get_container_ip(service_name)
+
+        console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
+        console.print(f"  Domain : {domain}")
+        console.print(f"  Status : {status}")
+        if container_ip:
+            console.print(f"  Container IP: {container_ip}")
+        config.save_args({"host": ssh.host, "port": ssh.port,
+                          "username": ssh.username, "key": ssh.key_filename}, "service")
+    finally:
+        ssh.disconnect()
+
+
+@service.command(name="status")
+@click.option("--name", "-n", help="Service name (defaults to current directory name)")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+def service_status(name, host, port, username, key, password, use_config):
+    """Show the running status of a deployed service."""
+    config = DeployConfig()
+    ssh = _build_ssh_from_config(config, "service", host, port, username, key, password)
+    if not ssh.host or not ssh.username:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    service_name = name or Path(".").resolve().name
+    if not ssh.connect():
+        sys.exit(1)
+    try:
+        mgr = ServiceManager(ssh)
+        status = mgr.get_status(service_name)
+        if status:
+            colour = "green" if status == "running" else "yellow"
+            console.print(f"[{colour}]Service '{service_name}': {status}[/{colour}]")
+        else:
+            console.print(f"[yellow]Service '{service_name}' not found on remote[/yellow]")
+    finally:
+        ssh.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# CLI root group
+# ---------------------------------------------------------------------------
+
 @click.group()
 def cli():
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH."""
@@ -1050,6 +1613,8 @@ cli.add_command(show_config, name="show-config")
 cli.add_command(clear_config, name="clear-config")
 cli.add_command(caddy, name="caddy")
 cli.add_command(docker_push, name="docker-push")
+cli.add_command(proxy, name="proxy")
+cli.add_command(service, name="service")
 
 
 if __name__ == "__main__":

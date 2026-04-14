@@ -1,0 +1,31 @@
+services:
+  caddy-proxy:
+    image: lucaslorentz/caddy-docker-proxy:latest
+    container_name: caddy-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - /opt/caddy-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - ingress
+    restart: unless-stopped
+    environment:
+      - CADDY_INGRESS_NETWORKS=ingress
+      - CADDY_DOCKER_CADDYFILE_PATH=/etc/caddy/Caddyfile
+
+volumes:
+  caddy_data:
+    name: caddy_data
+  caddy_config:
+    name: caddy_config
+
+networks:
+  ingress:
+    external: true
+    name: ingress

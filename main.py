@@ -25,6 +25,7 @@ from deploy.utils import (
     prompt_deploy_path,
     print_summary,
 )
+from deploy import __version__
 
 console = Console()
 
@@ -1602,6 +1603,7 @@ def service_status(name, host, port, username, key, password, use_config):
 # ---------------------------------------------------------------------------
 
 @click.group()
+@click.version_option(__version__, prog_name="deploy")
 def cli():
     """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH."""
     pass

@@ -1,0 +1,72 @@
+name: Release Binary
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: deploy-linux-x86_64
+            binary_path: dist/deploy
+          - os: macos-latest
+            artifact_name: deploy-macos-arm64
+            binary_path: dist/deploy
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Setup Python
+        run: uv python install 3.12
+
+      - name: Build binary
+        run: ./scripts/build.sh
+
+      - name: Package artifact
+        run: |
+          cp "${{ matrix.binary_path }}" "${{ matrix.artifact_name }}"
+          shasum -a 256 "${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}
+            ${{ matrix.artifact_name }}.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten assets
+        run: |
+          find release-assets -type f -maxdepth 3 -exec cp {} . \;
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            deploy-linux-x86_64
+            deploy-linux-x86_64.sha256
+            deploy-macos-arm64
+            deploy-macos-arm64.sha256

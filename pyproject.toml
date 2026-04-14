@@ -1,7 +1,7 @@
 [project]
 name = "deploy"
 version = "0.1.0"
-description = "Add your description here"
+description = "SSH deployment CLI for Git sync, Docker image transfer, and remote proxy/service management"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -2,6 +2,15 @@
 
 CLI toolkit for remote deployment over SSH. It combines Git sync, Docker image transfer, reverse proxy migration/management, and service scaffolding/deploy commands.
 
+## Open Source Status
+
+This repository is prepared for open-source use as a binary CLI tool.
+
+- Project model: uv-managed source + standalone binary release artifact
+- Primary release artifact: `dist/deploy`
+- CI verifies tests on push and pull requests
+- Tagged releases can publish platform binaries and checksums
+
 ## Current Status
 
 - Git push/pull workflows are stable.
@@ -14,6 +23,7 @@ CLI toolkit for remote deployment over SSH. It combines Git sync, Docker image t
 ## Requirements
 
 - Python 3.12+
+- `uv` for local development/build workflows
 - Docker available locally (for `docker-push`)
 - Docker available on remote host
 - SSH access to remote host
@@ -24,6 +34,12 @@ source .venv/bin/activate
 ```
 
 ## Install and Run
+
+Preferred local execution with uv:
+
+```sh
+uv run python main.py --help
+```
 
 Run directly:
 
@@ -43,6 +59,13 @@ Binary output:
 dist/deploy
 ```
 
+Show CLI version:
+
+```sh
+python main.py --version
+./dist/deploy --version
+```
+
 ## Top-Level Commands
 
 ```text
@@ -55,6 +78,11 @@ caddy
 show-config
 clear-config
 ```
+
+Global options:
+
+- `--help`
+- `--version`
 
 ## Core Workflows
 
@@ -199,3 +227,27 @@ Notes:
 ## Legacy Command Group
 
 `caddy` command group is still available for direct native Caddy management/import/apply flows, but current proxy-first workflows should prefer `proxy` + `service`.
+
+## Development
+
+Run tests:
+
+```sh
+uv run pytest
+```
+
+Build binary:
+
+```sh
+./scripts/build.sh
+```
+
+## Binary Verification
+
+For release binaries, verify checksums before execution:
+
+```sh
+shasum -a 256 dist/deploy
+```
+
+Compare the output with the published release checksum.

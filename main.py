@@ -1,6 +1,7 @@
 """Git SSH Deploy Tool - Main CLI entry point."""
 
 import json
+import re
 import sys
 from pathlib import Path
 import click
@@ -89,26 +90,30 @@ def _build_connection_from_config(
 
 
 def _resolve_service_image(image: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
-    """Resolve service image from CLI, local metadata, or remote metadata."""
+    """Resolve service image from CLI, metadata, or deployed service state."""
     if image:
         return image
 
-    local_metadata_path = Path(".deploy-service.json")
-    if local_metadata_path.exists():
-        try:
-            local_metadata = json.loads(local_metadata_path.read_text())
-            local_image = local_metadata.get("image")
-            if local_image:
-                return local_image
-        except Exception:
-            pass
+    resolved_image = _resolve_service_metadata_field("image", service_name, svc_mgr)
+    if resolved_image:
+        return resolved_image
 
-    remote_metadata = svc_mgr.read_service_metadata(service_name)
-    if remote_metadata:
-        remote_image = remote_metadata.get("image")
-        if remote_image:
-            return remote_image
-    return None
+    deployed_image_getter = getattr(svc_mgr, "get_deployed_image", None)
+    if callable(deployed_image_getter):
+        deployed_image = deployed_image_getter(service_name)
+        if deployed_image:
+            return deployed_image
+
+    return _default_service_image_name(service_name)
+
+
+def _default_service_image_name(service_name: str) -> str:
+    """Return a predictable Docker image name for service-side builds."""
+    normalized = re.sub(r"[^a-z0-9._/-]", "-", service_name.lower())
+    normalized = normalized.strip("-./")
+    if not normalized:
+        normalized = "service"
+    return f"{normalized}:latest"
 
 
 def _resolve_service_domain(domain: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
@@ -116,21 +121,36 @@ def _resolve_service_domain(domain: str | None, service_name: str, svc_mgr: Serv
     if domain:
         return domain
 
+    return _resolve_service_metadata_field("domain", service_name, svc_mgr)
+
+
+def _load_local_service_metadata() -> dict:
+    """Load local service metadata from the current working directory."""
     local_metadata_path = Path(".deploy-service.json")
-    if local_metadata_path.exists():
-        try:
-            local_metadata = json.loads(local_metadata_path.read_text())
-            local_domain = local_metadata.get("domain")
-            if local_domain:
-                return local_domain
-        except Exception:
-            pass
+    if not local_metadata_path.exists():
+        return {}
+    try:
+        loaded = json.loads(local_metadata_path.read_text())
+    except Exception:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return loaded
+
+
+def _resolve_service_metadata_field(field: str, service_name: str, svc_mgr: ServiceManager) -> str | None:
+    """Resolve a service metadata field from local metadata first, then target metadata."""
+    local_metadata = _load_local_service_metadata()
+    local_value = local_metadata.get(field)
+    if isinstance(local_value, str) and local_value.strip():
+        return local_value
 
     remote_metadata = svc_mgr.read_service_metadata(service_name)
-    if remote_metadata:
-        remote_domain = remote_metadata.get("domain")
-        if remote_domain:
-            return remote_domain
+    if not isinstance(remote_metadata, dict):
+        return None
+    remote_value = remote_metadata.get(field)
+    if isinstance(remote_value, str) and remote_value.strip():
+        return remote_value
     return None
 
 
@@ -1145,7 +1165,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 @service.command(name="deploy")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--image", "-i",
-              help="Docker image to run (optional if present in service metadata)")
+              help="Docker image name/tag to run or build on target (optional if resolvable from metadata/state)")
 @click.option("--domain", "-d",
               help="Public domain / hostname")
 @click.option("--port", type=int, default=8000,
@@ -1175,8 +1195,7 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
                    password, use_config, interactive, target):
     """Deploy a service image to the deployment target and register with ingress.
 
-    The image must already exist on the target (use 'deploy docker-push' first),
-    or the command will prompt you to push it.
+    When the image does not exist on target, the command can push or build it.
     """
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "service", target, host, ssh_port, username, key, password, use_config)
@@ -1228,14 +1247,17 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
             if not resolved_image:
                 if not interactive:
                     console.print(
-                        "[red]✗ Image is required in non-interactive mode. Provide --image or save image in metadata.[/red]"
+                        "[red]✗ Image name is required in non-interactive mode. Provide --image or save image in metadata.[/red]"
                     )
                     sys.exit(1)
                 from rich.prompt import Prompt
 
-                resolved_image = Prompt.ask("Docker image to deploy")
+                resolved_image = Prompt.ask(
+                    "Docker image name for target build/use",
+                    default=_default_service_image_name(service_name),
+                )
                 if not resolved_image:
-                    console.print("[red]✗ Image is required[/red]")
+                    console.print("[red]✗ Image name is required[/red]")
                     sys.exit(1)
 
             image = resolved_image
@@ -1244,17 +1266,15 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
                 choice = missing_image_action
                 if choice == "ask":
                     if not interactive:
-                        console.print(
-                            "[red]✗ Non-interactive mode requires --missing-image-action when image is absent on target.[/red]"
-                        )
-                        sys.exit(1)
-                    from rich.prompt import Prompt
+                        choice = "build"
+                    else:
+                        from rich.prompt import Prompt
 
-                    choice = Prompt.ask(
-                        "How would you like to provide the image?",
-                        choices=["push", "build", "abort"],
-                        default="push",
-                    )
+                        choice = Prompt.ask(
+                            "How would you like to provide the image?",
+                            choices=["push", "build", "abort"],
+                            default="build",
+                        )
                 if choice == "push":
                     from click.testing import CliRunner
                     runner = CliRunner()

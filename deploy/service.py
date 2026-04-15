@@ -331,6 +331,15 @@ class ServiceManager:
             return stdout.strip()
         return None
 
+    def get_deployed_image(self, service_name: str) -> Optional[str]:
+        """Return the container image currently used by the deployed service."""
+        exit_code, stdout, _ = self.ssh.execute(
+            f"docker inspect --format '{{{{.Config.Image}}}}' {self._q(service_name)} 2>/dev/null"
+        )
+        if exit_code == 0 and stdout.strip():
+            return stdout.strip()
+        return None
+
     def get_container_ip(self, service_name: str) -> Optional[str]:
         """Return the container's IP on the ingress network."""
         exit_code, stdout, _ = self.ssh.execute(

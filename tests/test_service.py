@@ -256,6 +256,16 @@ def test_get_status_not_found():
     assert ServiceManager(ssh).get_status("mysvc") is None
 
 
+def test_get_deployed_image_found():
+    ssh = DummySSH(responses=[(0, "repo/app:latest\n", "")])
+    assert ServiceManager(ssh).get_deployed_image("mysvc") == "repo/app:latest"
+
+
+def test_get_deployed_image_not_found():
+    ssh = DummySSH(responses=[(1, "", "No such object")])
+    assert ServiceManager(ssh).get_deployed_image("mysvc") is None
+
+
 def test_get_container_ip_found():
     ssh = DummySSH(responses=[(0, "172.18.0.5\n", "")])
     assert ServiceManager(ssh).get_container_ip("mysvc") == "172.18.0.5"

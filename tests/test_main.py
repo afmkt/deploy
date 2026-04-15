@@ -210,7 +210,7 @@ def test_service_deploy_remote_build_on_missing_image(monkeypatch):
     assert calls["build_image_from_context"][1] == "/tmp/deploy/repos/myrepo"
 
 
-def test_service_deploy_non_interactive_requires_image_resolution(monkeypatch):
+def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(monkeypatch):
     runner = CliRunner()
 
     class FakeConnection:
@@ -243,8 +243,11 @@ def test_service_deploy_non_interactive_requires_image_resolution(monkeypatch):
         def read_service_metadata(self, service_name):
             return None
 
+        def get_deployed_image(self, service_name):
+            return None
+
         def image_exists_remote(self, image):
-            return True
+            return False
 
     monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *args, **kwargs: FakeConnection())
     monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
@@ -261,7 +264,7 @@ def test_service_deploy_non_interactive_requires_image_resolution(monkeypatch):
     ])
 
     assert result.exit_code == 1
-    assert "Image is required in non-interactive mode" in result.output
+    assert "Deploy path is required for remote build context in non-interactive mode" in result.output
 
 
 def test_service_deploy_non_interactive_build_requires_deploy_path(monkeypatch):
@@ -707,4 +710,82 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
 
         assert result.exit_code == 1
         assert "Domain is required in non-interactive mode" in result.output
+
+
+    def test_service_deploy_resolves_image_from_deployed_container(monkeypatch, tmp_path):
+        runner = CliRunner()
+        calls = {}
+
+        class FakeConnection:
+            is_local = True
+            host = "local"
+            port = 0
+            username = "tester"
+            key_filename = None
+
+            def connect(self):
+                return True
+
+            def disconnect(self):
+                pass
+
+        class FakeProxyManager:
+            def __init__(self, ssh):
+                pass
+
+            def is_running(self):
+                return True
+
+            def get_configured_ingress_networks(self):
+                return ["ingress"]
+
+        class FakeServiceManager:
+            def __init__(self, ssh):
+                pass
+
+            def read_service_metadata(self, service_name):
+                return {"domain": "x.com", "image": None}
+
+            def get_deployed_image(self, service_name):
+                return "repo/app:latest"
+
+            def image_exists_remote(self, image):
+                return True
+
+            def ensure_service_dir(self, service_name):
+                return True
+
+            def upload_compose(self, service_name, compose_content):
+                calls["compose"] = compose_content
+                return True
+
+            def upload_metadata(self, service_name, metadata_content):
+                calls["metadata"] = metadata_content
+                return True
+
+            def compose_up(self, service_name):
+                return True
+
+            def get_status(self, service_name):
+                return "running"
+
+            def get_container_ip(self, service_name):
+                return None
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+        monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
+        monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+        monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *a, **kw: None)
+        monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+        result = runner.invoke(service, [
+            "deploy",
+            "--target", "local",
+            "--no-use-config",
+            "--no-interactive",
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "image: repo/app:latest" in calls["compose"]
     assert "http://localhost/healthz" in result.output

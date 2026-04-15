@@ -791,6 +791,160 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
     assert "http://localhost/healthz" in result.output
 
 
+def test_service_deploy_refuses_remote_domain_fallback_non_interactive(monkeypatch, tmp_path):
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeProxyManager:
+        def __init__(self, ssh):
+            pass
+
+        def is_running(self):
+            return True
+
+        def get_configured_ingress_networks(self):
+            return ["ingress"]
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            pass
+
+        def read_service_metadata(self, service_name):
+            return {"domain": "x.com", "image": "repo/app:latest"}
+
+        def get_routed_host(self, service_name):
+            return "x.com"
+
+        def image_exists_remote(self, image):
+            return True
+
+        def ensure_service_dir(self, service_name):
+            return True
+
+        def upload_compose(self, service_name, compose_content):
+            return True
+
+        def upload_metadata(self, service_name, metadata_content):
+            return True
+
+        def compose_up(self, service_name):
+            return True
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_container_ip(self, service_name):
+            return None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *a, **kw: None)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, [
+        "deploy",
+        "--target", "local",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 1, result.output
+    assert "Current routed host: x.com" in result.output
+    assert "Domain resolved from persisted target metadata" in result.output
+    assert "Refusing remote metadata domain fallback in non-interactive mode" in result.output
+
+
+def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp_path):
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeProxyManager:
+        def __init__(self, ssh):
+            pass
+
+        def is_running(self):
+            return True
+
+        def get_configured_ingress_networks(self):
+            return ["ingress"]
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            pass
+
+        def read_service_metadata(self, service_name):
+            return {"domain": "x.com", "image": "repo/app:latest"}
+
+        def get_routed_host(self, service_name):
+            return "x.com"
+
+        def image_exists_remote(self, image):
+            return True
+
+        def ensure_service_dir(self, service_name):
+            return True
+
+        def upload_compose(self, service_name, compose_content):
+            return True
+
+        def upload_metadata(self, service_name, metadata_content):
+            return True
+
+        def compose_up(self, service_name):
+            return True
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_container_ip(self, service_name):
+            return None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *a, **kw: None)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, [
+        "deploy",
+        "--target", "local",
+        "--no-use-config",
+        "--no-interactive",
+        "--allow-remote-domain-fallback",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "Current routed host: x.com" in result.output
+    assert "Domain resolved from persisted target metadata" in result.output
+
+
 def test_service_status_shows_logs(monkeypatch):
     """service status displays recent container logs alongside the status."""
     runner = CliRunner()

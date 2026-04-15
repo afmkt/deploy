@@ -118,10 +118,30 @@ def _default_service_image_name(service_name: str) -> str:
 
 def _resolve_service_domain(domain: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
     """Resolve service domain from CLI, local metadata, or remote metadata."""
-    if domain:
-        return domain
+    resolved, _ = _resolve_service_domain_with_source(domain, service_name, svc_mgr)
+    return resolved
 
-    return _resolve_service_metadata_field("domain", service_name, svc_mgr)
+
+def _resolve_service_domain_with_source(
+    domain: str | None,
+    service_name: str,
+    svc_mgr: ServiceManager,
+) -> tuple[str | None, str | None]:
+    """Resolve service domain and return both value and source label."""
+    if domain:
+        return domain, "cli"
+
+    local_metadata = _load_local_service_metadata()
+    local_value = local_metadata.get("domain")
+    if isinstance(local_value, str) and local_value.strip():
+        return local_value.strip(), "local-metadata"
+
+    remote_metadata = svc_mgr.read_service_metadata(service_name)
+    if isinstance(remote_metadata, dict):
+        remote_value = remote_metadata.get("domain")
+        if isinstance(remote_value, str) and remote_value.strip():
+            return remote_value.strip(), "remote-metadata"
+    return None, None
 
 
 def _load_local_service_metadata() -> dict:
@@ -1173,6 +1193,8 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
 @click.option("--rebuild", is_flag=True, default=False,
               help="Force a rebuild of the image from the remote build context even if the image already exists on target")
+@click.option("--allow-remote-domain-fallback", is_flag=True, default=False,
+              help="Allow reusing domain from persisted target metadata when --domain is not provided")
 @click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
               help="Action when image is missing on target")
 @click.option("--auto-sync-context/--no-auto-sync-context", default=True,
@@ -1192,7 +1214,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
               help="Interactive mode")
 @click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to deploy to a remote SSH host or the local machine")
-def service_deploy(name, image, domain, port, deploy_path, rebuild, missing_image_action, auto_sync_context,
+def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote_domain_fallback, missing_image_action, auto_sync_context,
                    ingress_networks, global_ingress, host, ssh_port, username, key,
                    password, use_config, interactive, target):
     """Deploy a service image to the deployment target and register with ingress.
@@ -1214,7 +1236,7 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, missing_imag
             svc_mgr = ServiceManager(ssh)
             proxy_mgr = ProxyManager(ssh)
 
-            domain = _resolve_service_domain(domain, service_name, svc_mgr)
+            domain, domain_source = _resolve_service_domain_with_source(domain, service_name, svc_mgr)
             if not domain:
                 if not interactive:
                     console.print(
@@ -1235,6 +1257,38 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, missing_imag
                 f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
                 border_style="blue",
             ))
+
+            routed_host_getter = getattr(svc_mgr, "get_routed_host", None)
+            current_routed_host = routed_host_getter(service_name) if callable(routed_host_getter) else None
+            if current_routed_host:
+                console.print(f"[dim]Current routed host: {current_routed_host}[/dim]")
+            if domain_source == "remote-metadata":
+                console.print(
+                    "[yellow]⚠ Domain resolved from persisted target metadata. "
+                    "Use --domain to override stale routing.[/yellow]"
+                )
+                console.print(
+                    "[dim]Example: deploy service deploy --name "
+                    f"{service_name} --domain localhost[/dim]"
+                )
+                if not allow_remote_domain_fallback:
+                    if not interactive:
+                        console.print(
+                            "[red]✗ Refusing remote metadata domain fallback in non-interactive mode. "
+                            "Provide --domain or pass --allow-remote-domain-fallback.[/red]"
+                        )
+                        sys.exit(1)
+
+                    from rich.prompt import Confirm
+
+                    if not Confirm.ask(
+                        "Proceed using persisted target metadata domain?",
+                        default=False,
+                    ):
+                        console.print(
+                            "[yellow]Aborted. Provide --domain to set routing explicitly.[/yellow]"
+                        )
+                        sys.exit(1)
 
         # Step 1: check ingress proxy is running
             console.print("\n[bold]Step 1: Check ingress proxy[/bold]")

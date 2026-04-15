@@ -1465,6 +1465,51 @@ def service_status(name, host, port, username, key, password, use_config, target
             if status:
                 colour = "green" if status == "running" else "yellow"
                 console.print(f"[{colour}]Service '{service_name}': {status}[/{colour}]")
+
+                active_route_host = None
+                routed_host_getter = getattr(mgr, "get_routed_host", None)
+                if callable(routed_host_getter):
+                    active_route_host = routed_host_getter(service_name)
+                    if active_route_host:
+                        console.print(f"[dim]Route host: {active_route_host}[/dim]")
+
+                configured_domain = None
+                metadata = None
+                metadata_getter = getattr(mgr, "read_service_metadata", None)
+                if callable(metadata_getter):
+                    metadata = metadata_getter(service_name)
+                    if isinstance(metadata, dict):
+                        domain_value = metadata.get("domain")
+                        if isinstance(domain_value, str) and domain_value.strip():
+                            configured_domain = domain_value.strip()
+                            console.print(f"[dim]Metadata domain: {configured_domain}[/dim]")
+
+                if active_route_host:
+                    if active_route_host == "localhost":
+                        console.print("[dim]Ingress access: curl http://localhost/<path>[/dim]")
+                    else:
+                        console.print(
+                            "[dim]Ingress access: curl -H \"Host: "
+                            f"{active_route_host}\" http://localhost/<path>[/dim]"
+                        )
+
+                if isinstance(metadata, dict):
+                    port_value = metadata.get("port")
+                    if isinstance(port_value, int) and port_value > 0:
+                        console.print(
+                            f"[dim]In-network access: http://{service_name}:{port_value}/<path>[/dim]"
+                        )
+
+                if configured_domain and active_route_host and configured_domain != active_route_host:
+                    console.print(
+                        "[yellow]⚠ Routed host does not match persisted service domain metadata[/yellow]"
+                    )
+                    console.print(
+                        "[dim]Redeploy with an explicit domain to update routing: "
+                        "deploy service deploy --name "
+                        f"{service_name} --domain <host>[/dim]"
+                    )
+
                 logs = mgr.get_logs(service_name, lines=20)
                 if logs.strip():
                     console.print("\n[bold]Recent logs:[/bold]")

@@ -905,3 +905,50 @@ def test_service_status_no_logs_skips_section(monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "Recent logs" not in result.output
+
+
+def test_service_status_warns_on_route_host_metadata_mismatch(monkeypatch):
+    """service status warns when active routed host diverges from persisted metadata domain."""
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_routed_host(self, service_name):
+            return "x.com"
+
+        def read_service_metadata(self, service_name):
+            return {"domain": "localhost", "port": 8000}
+
+        def get_logs(self, service_name, lines=20):
+            return ""
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+
+    assert result.exit_code == 0, result.output
+    assert "Route host: x.com" in result.output
+    assert "Metadata domain: localhost" in result.output
+    assert 'Ingress access: curl -H "Host: x.com" http://localhost/<path>' in result.output
+    assert "In-network access: http://auth:8000/<path>" in result.output
+    assert "Routed host does not match persisted service domain metadata" in result.output

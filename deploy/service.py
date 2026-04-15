@@ -340,6 +340,16 @@ class ServiceManager:
             return stdout.strip()
         return None
 
+    def get_routed_host(self, service_name: str) -> Optional[str]:
+        """Return the current caddy host label configured on the service container."""
+        exit_code, stdout, _ = self.ssh.execute(
+            f"docker inspect --format '{{{{ index .Config.Labels \"caddy\" }}}}' "
+            f"{self._q(service_name)} 2>/dev/null"
+        )
+        if exit_code == 0 and stdout.strip():
+            return stdout.strip()
+        return None
+
     def get_container_ip(self, service_name: str) -> Optional[str]:
         """Return the container's IP on the ingress network."""
         exit_code, stdout, _ = self.ssh.execute(

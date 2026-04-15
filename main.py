@@ -51,7 +51,7 @@ from deploy.utils import (
 from deploy import __version__
 
 console = Console()
-TARGET_CHOICES = click.Choice(["remote", "local"])
+TARGET_CHOICES = click.Choice(["auto", "remote", "local"])
 DEFAULT_DEPLOY_PATH = REPOS_DIR
 
 
@@ -187,7 +187,7 @@ def _sync_repo_context_and_reconnect(ssh, deploy_path: str) -> bool:
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual push")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
             help="Whether to deploy to a remote SSH host or the local machine")
 def main(repo_path: str, host: str, port: int, username: str, key: str,
         password: str, deploy_path: str, interactive: bool, use_config: bool, dry_run: bool,
@@ -326,7 +326,7 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--branch", "-b", help="Branch name to pull to")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual pull")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
             help="Whether to pull from a remote SSH host or the local machine")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
@@ -554,7 +554,7 @@ def clear_config(command: str):
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection without transferring image")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
                             help="Whether to transfer the image to a remote SSH host or the local machine")
 def docker_push(image: str, host: str, port: int, username: str, key: str,
                 password: str, platform: str | None, registry_username: str,
@@ -744,7 +744,7 @@ def proxy():
               help="If native Caddy exists, migrate its Caddyfile and stop it before proxy start")
 @click.option("--ingress-network", "ingress_networks", multiple=True,
               help="Ingress networks for proxy/service discovery (repeat flag or use comma-separated values)")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to manage the proxy on a remote SSH host or the local machine")
 @click.option("--interactive/--no-interactive", default=True,
               help="Interactive mode — disable for CI/CD pipelines")
@@ -911,7 +911,7 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to inspect a remote SSH host or the local machine")
 def proxy_status(host, port, username, key, password, use_config, target):
     """Show the status of the caddy-docker-proxy container."""
@@ -948,7 +948,7 @@ def proxy_status(host, port, username, key, password, use_config, target):
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to manage a remote SSH host or the local machine")
 def proxy_down(host, port, username, key, password, use_config, target):
     """Stop the caddy-docker-proxy ingress stack."""
@@ -975,7 +975,7 @@ def proxy_down(host, port, username, key, password, use_config, target):
               help="Load SSH args from saved config")
 @click.option("--lines", default=80, show_default=True,
               help="How many proxy log lines to fetch")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to inspect a remote SSH host or the local machine")
 def proxy_logs(host, port, username, key, password, use_config, lines, target):
     """Show recent docker-caddy-proxy container logs."""
@@ -1006,7 +1006,7 @@ def proxy_logs(host, port, username, key, password, use_config, lines, target):
               help="Load SSH args from saved config")
 @click.option("--lines", default=80, show_default=True,
               help="How many log/journal lines to fetch")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to diagnose a remote SSH host or the local machine")
 def proxy_diagnose(host, port, username, key, password, use_config, lines, target):
     """Collect proxy and native Caddy diagnostics from the deployment target."""
@@ -1139,7 +1139,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
     console.print(f"[green]✓ Wrote {metadata_path}[/green]")
 
     console.print("\n[bold green]✓ Service initialised[/bold green]")
-    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image> (or --target local)[/dim]")
+    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
 
 
 @service.command(name="deploy")
@@ -1168,7 +1168,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
               help="Load SSH args from saved config")
 @click.option("--interactive/--no-interactive", default=True,
               help="Interactive mode")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to deploy to a remote SSH host or the local machine")
 def service_deploy(name, image, domain, port, deploy_path, missing_image_action, auto_sync_context,
                    ingress_networks, global_ingress, host, ssh_port, username, key,
@@ -1420,7 +1420,7 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to inspect a remote SSH host or the local machine")
 def service_status(name, host, port, username, key, password, use_config, target):
     """Show the running status of a deployed service."""
@@ -1464,7 +1464,7 @@ def service_status(name, host, port, username, key, password, use_config, target
               help="Per-command SSH timeout in seconds")
 @click.option("--action-timeout", default=15.0, show_default=True,
               help="Overall monitor action timeout in seconds")
-@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
                             help="Whether to monitor a remote SSH host or the local machine")
 def monitor(host, port, username, key, password, use_config, refresh_interval, log_lines,
                         command_timeout, action_timeout, target):

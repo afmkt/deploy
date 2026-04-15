@@ -27,6 +27,8 @@ def test_resolve_target_prefers_localhost():
     assert resolve_target("remote", "local") == "local"
     assert resolve_target("remote", "localhost") == "local"
     assert resolve_target("remote", "example.com") == "remote"
+    assert resolve_target("auto", None) == "local"
+    assert resolve_target("local", "example.com") == "remote"
 
 
 def test_display_target_local_and_remote():

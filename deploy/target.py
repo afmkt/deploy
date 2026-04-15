@@ -11,11 +11,15 @@ def is_local_host(host: str | None) -> bool:
     return bool(host and host.strip().lower() in LOCAL_HOST_ALIASES)
 
 
-def resolve_target(target: str, host: str | None) -> str:
-    """Resolve target mode, allowing localhost-style hosts to imply local mode."""
+def resolve_target(target: str | None, host: str | None) -> str:
+    """Resolve target mode from host first, then explicit target, then default to local."""
     if is_local_host(host):
         return "local"
-    return target
+    if host and host.strip():
+        return "remote"
+    if target in {"local", "remote"}:
+        return target
+    return "local"
 
 
 def is_local_connection(connection) -> bool:

@@ -1,5 +1,6 @@
 """Git SSH Deploy Tool - Main CLI entry point."""
 
+import json
 import sys
 from pathlib import Path
 import click
@@ -27,6 +28,7 @@ from deploy.target import (
     docker_push_args_for_connection,
     import_source_label,
     is_local_connection,
+    push_args_for_connection,
     proxy_healthcheck_url,
 )
 from deploy.docker import DockerManager, _safe_image_filename
@@ -84,6 +86,71 @@ def _build_connection_from_config(
     if completed is None:
         return None
     return build_connection(completed, command_timeout)
+
+
+def _resolve_service_image(image: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
+    """Resolve service image from CLI, local metadata, or remote metadata."""
+    if image:
+        return image
+
+    local_metadata_path = Path(".deploy-service.json")
+    if local_metadata_path.exists():
+        try:
+            local_metadata = json.loads(local_metadata_path.read_text())
+            local_image = local_metadata.get("image")
+            if local_image:
+                return local_image
+        except Exception:
+            pass
+
+    remote_metadata = svc_mgr.read_service_metadata(service_name)
+    if remote_metadata:
+        remote_image = remote_metadata.get("image")
+        if remote_image:
+            return remote_image
+    return None
+
+
+def _resolve_service_deploy_path(
+    config: DeployConfig,
+    use_config: bool,
+    deploy_path: str | None,
+    interactive: bool,
+) -> str | None:
+    """Resolve the remote deploy path for repo-based build contexts."""
+    if deploy_path:
+        return deploy_path
+    if use_config:
+        for section in ("service", "push", "pull"):
+            saved = config.load_args(section)
+            if saved.get("deploy_path"):
+                return saved["deploy_path"]
+    if not interactive:
+        return None
+    from rich.prompt import Prompt
+
+    return Prompt.ask(
+        "Remote deploy path containing synced repository working directories",
+        default=DEFAULT_DEPLOY_PATH,
+    )
+
+
+def _sync_repo_context_and_reconnect(ssh, deploy_path: str) -> bool:
+    """Run deploy push for the active target and reconnect the session."""
+    from click.testing import CliRunner
+
+    runner = CliRunner()
+    push_result = runner.invoke(
+        main,
+        push_args_for_connection(".", deploy_path, ssh),
+        catch_exceptions=False,
+        standalone_mode=False,
+    )
+    if push_result.exit_code != 0:
+        console.print("[red]✗ deploy push failed[/red]")
+        return False
+    ssh.disconnect()
+    return ssh.connect()
 
 
 @click.command()
@@ -656,7 +723,9 @@ def proxy():
               help="Ingress networks for proxy/service discovery (repeat flag or use comma-separated values)")
 @click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
               help="Whether to manage the proxy on a remote SSH host or the local machine")
-def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy, ingress_networks, target):
+@click.option("--interactive/--no-interactive", default=True,
+              help="Interactive mode — disable for CI/CD pipelines")
+def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy, ingress_networks, target, interactive):
     """Start (or ensure running) the caddy-docker-proxy ingress stack."""
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
@@ -688,10 +757,13 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
             if native_caddy_found:
                 console.print("[yellow]⚠ Native Caddy detected on target host[/yellow]")
                 if migrate_native_caddy:
-                    should_migrate_native_caddy = Confirm.ask(
-                        "Migrate native Caddy config and hand over ports 80/443 to docker-caddy-proxy?",
-                        default=True,
-                    )
+                    if interactive:
+                        should_migrate_native_caddy = Confirm.ask(
+                            "Migrate native Caddy config and hand over ports 80/443 to docker-caddy-proxy?",
+                            default=True,
+                        )
+                    else:
+                        should_migrate_native_caddy = True
                 else:
                     console.print("[yellow]Native Caddy migration is disabled by flag[/yellow]")
             else:
@@ -706,10 +778,15 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
             console.print("\n[bold]Step 2: Check proxy image[/bold]")
             if not mgr.proxy_image_exists_remote():
                 console.print(f"[yellow]Image {PROXY_IMAGE} not found on target.[/yellow]")
-                if Confirm.ask(
-                    f"Push {PROXY_IMAGE} to target now using docker-push?",
-                    default=True,
-                ):
+                if interactive:
+                    should_push_image = Confirm.ask(
+                        f"Push {PROXY_IMAGE} to target now using docker-push?",
+                        default=True,
+                    )
+                else:
+                    console.print(f"[dim]Non-interactive mode: auto-pushing {PROXY_IMAGE}[/dim]")
+                    should_push_image = True
+                if should_push_image:
                     from click.testing import CliRunner
                     runner = CliRunner()
                     result = runner.invoke(
@@ -1044,12 +1121,17 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 
 @service.command(name="deploy")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
-@click.option("--image", "-i", required=True,
-              help="Docker image to run (must be present on remote or pushed beforehand)")
+@click.option("--image", "-i",
+              help="Docker image to run (optional if present in service metadata)")
 @click.option("--domain", "-d", required=True,
               help="Public domain / hostname")
 @click.option("--port", type=int, default=8000,
               help="App port inside the container")
+@click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
+@click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
+              help="Action when image is missing on target")
+@click.option("--auto-sync-context/--no-auto-sync-context", default=True,
+              help="Automatically sync repository context on target before remote build when needed")
 @click.option("--ingress-network", "ingress_networks", multiple=True,
               help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
 @click.option("--global-ingress/--no-global-ingress", default=False,
@@ -1061,10 +1143,13 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
+@click.option("--interactive/--no-interactive", default=True,
+              help="Interactive mode")
 @click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
               help="Whether to deploy to a remote SSH host or the local machine")
-def service_deploy(name, image, domain, port, ingress_networks, global_ingress, host, ssh_port, username, key,
-                   password, use_config, target):
+def service_deploy(name, image, domain, port, deploy_path, missing_image_action, auto_sync_context,
+                   ingress_networks, global_ingress, host, ssh_port, username, key,
+                   password, use_config, interactive, target):
     """Deploy a service image to the deployment target and register with ingress.
 
     The image must already exist on the target (use 'deploy docker-push' first),
@@ -1082,7 +1167,7 @@ def service_deploy(name, image, domain, port, ingress_networks, global_ingress, 
 
     console.print(Panel.fit(
         f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
-        f"Image: {image}  Domain: {domain}  Port: {port}\n"
+        f"Image: {image or '<auto-resolve>'}  Domain: {domain}  Port: {port}\n"
         f"Target: {display_target(ssh)}\n"
         f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
         border_style="blue",
@@ -1102,13 +1187,38 @@ def service_deploy(name, image, domain, port, ingress_networks, global_ingress, 
 
         # Step 2: check image availability on remote
             console.print("\n[bold]Step 2: Check image on target[/bold]")
+            resolved_image = _resolve_service_image(image, service_name, svc_mgr)
+            if not resolved_image:
+                if not interactive:
+                    console.print(
+                        "[red]✗ Image is required in non-interactive mode. Provide --image or save image in metadata.[/red]"
+                    )
+                    sys.exit(1)
+                from rich.prompt import Prompt
+
+                resolved_image = Prompt.ask("Docker image to deploy")
+                if not resolved_image:
+                    console.print("[red]✗ Image is required[/red]")
+                    sys.exit(1)
+
+            image = resolved_image
             if not svc_mgr.image_exists_remote(image):
                 console.print(f"[yellow]Image '{image}' not found on target.[/yellow]")
-                from rich.prompt import Confirm
-                if Confirm.ask(
-                    f"Push '{image}' to target now using docker-push?",
-                    default=True,
-                ):
+                choice = missing_image_action
+                if choice == "ask":
+                    if not interactive:
+                        console.print(
+                            "[red]✗ Non-interactive mode requires --missing-image-action when image is absent on target.[/red]"
+                        )
+                        sys.exit(1)
+                    from rich.prompt import Prompt
+
+                    choice = Prompt.ask(
+                        "How would you like to provide the image?",
+                        choices=["push", "build", "abort"],
+                        default="push",
+                    )
+                if choice == "push":
                     from click.testing import CliRunner
                     runner = CliRunner()
                     result = runner.invoke(
@@ -1126,6 +1236,88 @@ def service_deploy(name, image, domain, port, ingress_networks, global_ingress, 
                         sys.exit(1)
                     svc_mgr = ServiceManager(ssh)
                     proxy_mgr = ProxyManager(ssh)
+                elif choice == "build":
+                    deploy_path = _resolve_service_deploy_path(config, use_config, deploy_path, interactive)
+                    if not deploy_path:
+                        console.print(
+                            "[red]✗ Deploy path is required for remote build context in non-interactive mode. Provide --deploy-path or save push/pull deploy_path in config.[/red]"
+                        )
+                        sys.exit(1)
+                    repo = GitRepository(".")
+                    if not repo.validate():
+                        console.print("[red]✗ Remote build requires a local git repository.[/red]")
+                        sys.exit(1)
+                    repo_name = repo.get_repo_name()
+                    local_revision = repo.get_current_revision()
+                    remote = RemoteServer(ssh, deploy_path)
+                    context_path = remote.get_working_dir_path(repo_name)
+
+                    if not svc_mgr.context_is_git_repo(context_path):
+                        console.print(
+                            f"[yellow]Build context not found on target at {context_path}.[/yellow]"
+                        )
+                        should_sync = auto_sync_context
+                        if not should_sync and interactive:
+                            from rich.prompt import Prompt
+
+                            should_sync = Prompt.ask(
+                                "Sync repository to target now using deploy push?",
+                                choices=["yes", "no"],
+                                default="yes",
+                            ) == "yes"
+                        if should_sync:
+                            if not _sync_repo_context_and_reconnect(ssh, deploy_path):
+                                sys.exit(1)
+                            svc_mgr = ServiceManager(ssh)
+                            remote = RemoteServer(ssh, deploy_path)
+                            context_path = remote.get_working_dir_path(repo_name)
+                        else:
+                            console.print(
+                                "[red]✗ Cannot build without synced remote context. Run deploy push first or enable --auto-sync-context.[/red]"
+                            )
+                            sys.exit(1)
+
+                    remote_revision = svc_mgr.get_context_revision(context_path)
+                    if not remote_revision:
+                        console.print("[red]✗ Failed to read remote build context revision[/red]")
+                        sys.exit(1)
+                    if local_revision and remote_revision != local_revision:
+                        console.print(
+                            f"[yellow]Revision mismatch: local {local_revision} vs target {remote_revision}[/yellow]"
+                        )
+                        should_sync = auto_sync_context
+                        if not should_sync and interactive:
+                            from rich.prompt import Prompt
+
+                            should_sync = Prompt.ask(
+                                "Sync repository to target now using deploy push?",
+                                choices=["yes", "no"],
+                                default="yes",
+                            ) == "yes"
+                        if should_sync:
+                            if not _sync_repo_context_and_reconnect(ssh, deploy_path):
+                                sys.exit(1)
+                            svc_mgr = ServiceManager(ssh)
+                            remote = RemoteServer(ssh, deploy_path)
+                            context_path = remote.get_working_dir_path(repo_name)
+                        else:
+                            console.print(
+                                "[red]✗ Remote context must match local revision before build. Run deploy push first or enable --auto-sync-context.[/red]"
+                            )
+                            sys.exit(1)
+
+                    if not svc_mgr.context_is_git_repo(context_path):
+                        console.print("[red]✗ Synced remote context is still unavailable[/red]")
+                        sys.exit(1)
+                    remote_revision = svc_mgr.get_context_revision(context_path)
+                    if local_revision and remote_revision != local_revision:
+                        console.print(
+                            "[red]✗ Remote context revision still mismatches local repository after sync[/red]"
+                        )
+                        sys.exit(1)
+
+                    if not svc_mgr.build_image_from_context(image, context_path):
+                        sys.exit(1)
                 else:
                     console.print(
                         f"[yellow]Run: deploy docker-push {' '.join(docker_push_args_for_connection(image, ssh))} first[/yellow]"

@@ -71,3 +71,21 @@ def docker_push_args_for_connection(image: str, connection) -> list[str]:
     if getattr(connection, "key_filename", None):
         args.extend(["--key", connection.key_filename])
     return args
+
+
+def push_args_for_connection(repo_path: str, deploy_path: str, connection) -> list[str]:
+    """Build push CLI arguments for the given target connection."""
+    args = [
+        "--repo-path",
+        repo_path,
+        "--deploy-path",
+        deploy_path,
+        "--no-interactive",
+        "--host",
+        "localhost" if is_local_connection(connection) else connection.host,
+    ]
+    if not is_local_connection(connection):
+        args.extend(["--port", str(connection.port), "--username", connection.username])
+    if getattr(connection, "key_filename", None):
+        args.extend(["--key", connection.key_filename])
+    return args

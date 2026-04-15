@@ -9,6 +9,7 @@ from deploy.target import (
     import_source_label,
     is_local_host,
     needs_remote_identity,
+    push_args_for_connection,
     proxy_healthcheck_url,
     resolve_target,
 )
@@ -62,6 +63,35 @@ def test_docker_push_args_for_connection_local_and_remote():
     assert docker_push_args_for_connection("nginx:latest", remote) == [
         "--image",
         "nginx:latest",
+        "--no-interactive",
+        "--host",
+        "example.com",
+        "--port",
+        "2222",
+        "--username",
+        "root",
+        "--key",
+        "/tmp/key",
+    ]
+
+
+def test_push_args_for_connection_local_and_remote():
+    local = LocalConnection(username="tester")
+    remote = SSHConnection(host="example.com", port=2222, username="root", key_filename="/tmp/key")
+    assert push_args_for_connection(".", "/tmp/deploy/repos", local) == [
+        "--repo-path",
+        ".",
+        "--deploy-path",
+        "/tmp/deploy/repos",
+        "--no-interactive",
+        "--host",
+        "localhost",
+    ]
+    assert push_args_for_connection(".", "/tmp/deploy/repos", remote) == [
+        "--repo-path",
+        ".",
+        "--deploy-path",
+        "/tmp/deploy/repos",
         "--no-interactive",
         "--host",
         "example.com",

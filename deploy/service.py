@@ -153,6 +153,34 @@ class ServiceManager:
         )
         return exit_code == 0
 
+    def context_is_git_repo(self, context_path: str) -> bool:
+        """Return True when the build context path is a git working directory."""
+        exit_code, _, _ = self.ssh.execute(
+            f"test -d {self._q(context_path)} && cd {self._q(context_path)} && git rev-parse --is-inside-work-tree >/dev/null 2>&1"
+        )
+        return exit_code == 0
+
+    def get_context_revision(self, context_path: str) -> Optional[str]:
+        """Return the current short revision for a git build context on target."""
+        exit_code, stdout, _ = self.ssh.execute(
+            f"cd {self._q(context_path)} && git rev-parse --short HEAD"
+        )
+        if exit_code != 0:
+            return None
+        return stdout.strip() or None
+
+    def build_image_from_context(self, image: str, context_path: str) -> bool:
+        """Build a Docker image from an existing context directory on target."""
+        console.print(f"[blue]Building '{image}' on target from {context_path}...[/blue]")
+        exit_code, _, stderr = self.ssh.execute(
+            f"docker build -t {self._q(image)} {self._q(context_path)}"
+        )
+        if exit_code != 0:
+            console.print(f"[red]✗ Remote docker build failed: {stderr.strip()}[/red]")
+            return False
+        console.print(f"[green]✓ Image '{image}' built on target[/green]")
+        return True
+
     def ensure_service_dir(self, service_name: str) -> bool:
         """Create the remote service directory."""
         remote_dir = self._service_dir(service_name)

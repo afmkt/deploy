@@ -320,3 +320,43 @@ def test_list_services_failure():
     ssh = DummySSH(responses=[(1, "", "permission denied")])
     names = ServiceManager(ssh).list_services()
     assert names == []
+
+
+# ---------------------------------------------------------------------------
+# ServiceManager context checks and build
+# ---------------------------------------------------------------------------
+
+def test_context_is_git_repo_true():
+    ssh = DummySSH(responses=[(0, "", "")])
+    assert ServiceManager(ssh).context_is_git_repo("/tmp/deploy/repos/myrepo") is True
+
+
+def test_context_is_git_repo_false():
+    ssh = DummySSH(responses=[(1, "", "not a git repo")])
+    assert ServiceManager(ssh).context_is_git_repo("/tmp/deploy/repos/myrepo") is False
+
+
+def test_get_context_revision_success():
+    ssh = DummySSH(responses=[(0, "abc123\n", "")])
+    assert ServiceManager(ssh).get_context_revision("/tmp/deploy/repos/myrepo") == "abc123"
+
+
+def test_get_context_revision_failure():
+    ssh = DummySSH(responses=[(1, "", "bad revision")])
+    assert ServiceManager(ssh).get_context_revision("/tmp/deploy/repos/myrepo") is None
+
+
+def test_build_image_from_context_success():
+    ssh = DummySSH(responses=[(0, "", "")])
+    result = ServiceManager(ssh).build_image_from_context("myimage:tag", "/tmp/deploy/repos/myrepo")
+    assert result is True
+    cmd = ssh.executed[0]
+    assert "docker build" in cmd
+    assert "myimage:tag" in cmd
+    assert "/tmp/deploy/repos/myrepo" in cmd
+
+
+def test_build_image_from_context_failure():
+    ssh = DummySSH(responses=[(1, "", "no such file: Dockerfile")])
+    result = ServiceManager(ssh).build_image_from_context("myimage:tag", "/tmp/deploy/repos/myrepo")
+    assert result is False

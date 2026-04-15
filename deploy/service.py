@@ -9,7 +9,8 @@ from typing import Optional, Sequence
 from rich.console import Console
 
 from .ssh import SSHConnection
-from .proxy import INGRESS_NETWORK, normalize_ingress_networks
+from .ingress import INGRESS_NETWORK, normalize_ingress_networks
+from .paths import SERVICES_DIR
 
 console = Console()
 
@@ -131,7 +132,7 @@ def render_service_metadata(
 class ServiceManager:
     """Manages remote deployment lifecycle for a single service."""
 
-    def __init__(self, ssh: SSHConnection, remote_base: str = "/tmp/deploy/services"):
+    def __init__(self, ssh: SSHConnection, remote_base: str = SERVICES_DIR):
         self.ssh = ssh
         self.remote_base = remote_base
 

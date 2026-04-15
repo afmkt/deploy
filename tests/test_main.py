@@ -106,7 +106,9 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
 
 
 def test_build_connection_uses_local_for_localhost_host():
-    conn = main_module._build_connection(
+    from deploy.session import build_connection, ConnectionProfile
+
+    profile = ConnectionProfile(
         target="remote",
         host="localhost",
         port=22,
@@ -114,6 +116,7 @@ def test_build_connection_uses_local_for_localhost_host():
         key="",
         password="",
     )
+    conn = build_connection(profile)
     assert getattr(conn, "is_local", False) is True
 
 

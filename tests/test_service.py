@@ -11,7 +11,7 @@ from deploy.service import (
     render_service_compose,
     ServiceManager,
 )
-from deploy.proxy import INGRESS_NETWORK
+from deploy.ingress import INGRESS_NETWORK
 
 
 class DummySSH:

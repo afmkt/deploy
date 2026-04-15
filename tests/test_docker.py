@@ -526,7 +526,7 @@ def test_docker_push_use_config_falls_back_to_push_profile(monkeypatch):
             }
         return {}
 
-    monkeypatch.setattr(main_module, "SSHConnection", FakeSSHConnection)
+    monkeypatch.setattr("deploy.session.SSHConnection", FakeSSHConnection)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", fake_load_args)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")

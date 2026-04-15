@@ -3,6 +3,7 @@
 from deploy.local import LocalConnection
 from deploy.ssh import SSHConnection
 from deploy.target import (
+    construct_repo_url,
     display_target,
     docker_push_args_for_connection,
     import_source_label,
@@ -77,3 +78,10 @@ def test_needs_remote_identity_only_for_incomplete_remote():
     assert needs_remote_identity(local) is False
     assert needs_remote_identity(remote_missing) is True
     assert needs_remote_identity(remote_ok) is False
+
+
+def test_construct_repo_url_local_and_remote():
+    local = LocalConnection(username="tester")
+    remote = SSHConnection(host="example.com", port=2222, username="root")
+    assert construct_repo_url("/tmp/deploy/repos/myrepo.git", local) == "/tmp/deploy/repos/myrepo.git"
+    assert construct_repo_url("/tmp/deploy/repos/myrepo.git", remote) == "ssh://root@example.com:2222/tmp/deploy/repos/myrepo.git"

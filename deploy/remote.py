@@ -4,6 +4,7 @@ import shlex
 from typing import Optional
 from rich.console import Console
 from .ssh import SSHConnection
+from .paths import REPOS_DIR
 
 console = Console()
 
@@ -11,7 +12,7 @@ console = Console()
 class RemoteServer:
     """Manages remote server operations for deployment."""
 
-    def __init__(self, ssh: SSHConnection, deploy_path: str = "/tmp/deploy/repos"):
+    def __init__(self, ssh: SSHConnection, deploy_path: str = REPOS_DIR):
         """Initialize remote server handler.
 
         Args:

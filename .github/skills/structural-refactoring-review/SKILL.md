@@ -19,12 +19,13 @@ This repository already has a few important shared seams:
 
 ## Review Goals
 
-Prioritize findings that reduce behavior drift across commands.
+Prioritize findings that reduce behavior drift across commands and simplify the conceptual model.
 
 - Prefer one shared helper over repeated per-command conditionals.
 - Prefer manager-level or helper-level refactors over CLI-only fixes.
 - Prefer a single source of truth for defaults, target inference, path layout, and config fallback behavior.
 - Prefer changes that make local and remote execution behave the same except for transport.
+- Prefer changes that eliminate the need to document special behavior for individual workflows under certain operation targets; when all workflows share the same behavior, the description is simpler and fewer edge cases exist.
 
 ## What To Look For
 
@@ -36,6 +37,7 @@ Inspect the code for these patterns:
 4. Features implemented in one command group but not structurally available to related command groups.
 5. CLI code in `main.py` that is doing business logic which should live in a module under `deploy/`.
 6. Tests that validate behavior in one flow but leave equivalent flows uncovered.
+7. Special case handling for individual workflows under specific operation targets (local vs. remote) that could be unified; unified behavior will have a simpler description and fewer edge cases.
 
 ## Procedure
 
@@ -53,6 +55,7 @@ Inspect the code for these patterns:
 - If path or deployment metadata handling repeats, prefer centralization in the responsible manager module.
 - If the CLI is converting, normalizing, or reconciling inputs repeatedly, move that logic out of `main.py` unless it is strictly presentation-related.
 - If proxy and service behavior must stay aligned, look for a shared representation rather than mirrored logic.
+- When you find a workflow that behaves differently under different operation targets, ask: can this be unified? Unified behavior is easier to describe, test, and maintain. A refactor that eliminates a special case is worth the effort.
 
 ## Output Expectations
 

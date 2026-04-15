@@ -50,6 +50,13 @@ def proxy_healthcheck_url(connection) -> str:
     return f"http://{host}/healthz"
 
 
+def construct_repo_url(repo_path: str, connection) -> str:
+    """Return a repository URL suitable for the active connection transport."""
+    if is_local_connection(connection):
+        return repo_path
+    return f"ssh://{connection.username}@{connection.host}:{connection.port}{repo_path}"
+
+
 def docker_push_args_for_connection(image: str, connection) -> list[str]:
     """Build docker-push CLI arguments for the given target connection."""
     args = [

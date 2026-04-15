@@ -5,3 +5,4 @@
 5. Prefer correctness via shared code structure over patching individual code paths. When multiple commands or managers need the same behavior, centralize that behavior in a shared abstraction or helper instead of duplicating conditionals.
 6. When a change touches both local and remote flows, or both proxy and service behavior, first look for the common seam and refactor there before editing each command separately.
 7. When reviewing or extending the codebase, actively look for duplicated target resolution, config fallback, path defaulting, and local-versus-remote branching, and propose or apply structural cleanup when it materially improves consistency.
+8. A good refactoring makes it easier to describe the behavior of the software. When all workflows have the same behavior across all operation targets, we don't need to describe special cases for individual workflows. Simpler descriptions mean simpler understanding and fewer edge cases.

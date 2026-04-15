@@ -152,5 +152,42 @@ def test_proxy_status_reports_healthcheck_url(monkeypatch):
     result = runner.invoke(proxy, ["status", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0
-    assert "Ingress proxy: running" in result.output
+    assert "Ingress proxy is running (running)" in result.output
+    assert "http://localhost/healthz" in result.output
+
+
+def test_proxy_status_reports_not_running_state(monkeypatch):
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeProxyManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self):
+            return "exited"
+
+        def is_running(self):
+            return False
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *args, **kwargs: FakeConnection())
+    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
+
+    result = runner.invoke(proxy, ["status", "--host", "localhost", "--no-use-config"])
+
+    assert result.exit_code == 0
+    assert "Ingress proxy is not running (status: exited)" in result.output
+    assert "Run: deploy proxy up" in result.output
     assert "http://localhost/healthz" in result.output

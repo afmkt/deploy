@@ -132,6 +132,34 @@ class ProxyManager:
     def _native_caddyfile_backup_path(self) -> str:
         return str(Path(self._proxy_base_dir()) / "Caddyfile.native.backup")
 
+    def _prepare_writable_file_path(self, file_path: str, description: str) -> bool:
+        """Ensure a remote file path is writable, repairing stale directory collisions."""
+        remote_dir = str(Path(file_path).parent)
+        exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to create proxy directory: {stderr.strip()}[/red]")
+            return False
+
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"if [ -d {self._q(file_path)} ]; then echo yes; else echo no; fi"
+        )
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to inspect {description} path: {stderr.strip()}[/red]")
+            return False
+
+        if stdout.strip() == "yes":
+            console.print(
+                f"[yellow]Found directory at file path {file_path}; removing stale directory[/yellow]"
+            )
+            exit_code, _, stderr = self.ssh.execute(f"rm -rf {self._q(file_path)}")
+            if exit_code != 0:
+                console.print(
+                    f"[red]✗ Failed to remove stale directory at {file_path}: {stderr.strip()}[/red]"
+                )
+                return False
+
+        return True
+
     # ------------------------------------------------------------------
     # Network
     # ------------------------------------------------------------------
@@ -230,10 +258,7 @@ class ProxyManager:
         docker label-driven routes are discovered.
         """
         bootstrap_path = self._bootstrap_caddyfile_path()
-        remote_dir = str(Path(bootstrap_path).parent)
-        exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
-        if exit_code != 0:
-            console.print(f"[red]✗ Failed to create proxy directory: {stderr.strip()}[/red]")
+        if not self._prepare_writable_file_path(bootstrap_path, "bootstrap Caddyfile"):
             return False
 
         rendered_content = render_bootstrap_caddyfile(caddyfile_content)
@@ -283,10 +308,7 @@ class ProxyManager:
     def backup_native_caddyfile(self, caddyfile_content: str) -> bool:
         """Store a copy of the native Caddy config under the proxy working dir."""
         backup_path = self._native_caddyfile_backup_path()
-        remote_dir = str(Path(backup_path).parent)
-        exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
-        if exit_code != 0:
-            console.print(f"[red]✗ Failed to create proxy directory: {stderr.strip()}[/red]")
+        if not self._prepare_writable_file_path(backup_path, "native Caddyfile backup"):
             return False
 
         write_cmd = (

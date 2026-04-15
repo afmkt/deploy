@@ -16,6 +16,7 @@ from deploy.session import (
     build_connection,
     complete_connection_profile,
     connection_args,
+    connection_args_from_connection,
     load_connection_profile,
     load_defaulted_value,
     managed_connection,
@@ -799,9 +800,7 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
             if not ServiceManager(ssh).reconcile_global_services(networks):
                 sys.exit(1)
             console.print(f"\n[bold green]✓ Ingress proxy is {status}[/bold green]")
-            config.save_args({"host": ssh.host, "port": ssh.port,
-                              "username": ssh.username, "key": ssh.key_filename,
-                              "target": target}, "proxy")
+            config.save_args(connection_args_from_connection(ssh), "proxy")
     except ConnectionError:
         sys.exit(1)
 
@@ -830,8 +829,11 @@ def proxy_status(host, port, username, key, password, use_config, target):
             status = mgr.get_status()
             running = mgr.is_running()
             if status:
-                colour = "green" if running else "yellow"
-                console.print(f"[{colour}]Ingress proxy: {status}[/{colour}]")
+                if running:
+                    console.print(f"[green]Ingress proxy is running ({status})[/green]")
+                else:
+                    console.print(f"[red]Ingress proxy is not running (status: {status})[/red]")
+                    console.print("[dim]Run: deploy proxy up[/dim]")
                 console.print(f"[dim]Health check: {proxy_healthcheck_url(ssh)}[/dim]")
             else:
                 console.print("[yellow]Ingress proxy container not found[/yellow]")
@@ -1181,9 +1183,7 @@ def service_deploy(name, image, domain, port, ingress_networks, global_ingress, 
             console.print(f"  Exposure: {'global' if global_ingress else 'single-network'}")
             if container_ip:
                 console.print(f"  Container IP: {container_ip}")
-            config.save_args({"host": ssh.host, "port": ssh.port,
-                              "username": ssh.username, "key": ssh.key_filename,
-                              "target": target}, "service")
+            config.save_args(connection_args_from_connection(ssh), "service")
     except ConnectionError:
         sys.exit(1)
 
@@ -1264,13 +1264,7 @@ def monitor(host, port, username, key, password, use_config, refresh_interval, l
         console.print("[dim]Use --host/--username or save config via push/pull/proxy/service first[/dim]")
         sys.exit(1)
 
-    config.save_args({
-        "host": ssh.host,
-        "port": ssh.port,
-        "username": ssh.username,
-        "key": ssh.key_filename,
-        "target": target,
-    }, "monitor")
+    config.save_args(connection_args_from_connection(ssh), "monitor")
 
     try:
         from deploy.monitor.app import MonitorApp

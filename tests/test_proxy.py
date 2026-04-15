@@ -320,12 +320,24 @@ def test_get_native_caddyfile_path_returns_detected_path():
 
 
 def test_write_bootstrap_caddyfile_success():
-    ssh = DummySSH(responses=[(0, "", ""), (0, "", "")])
+    ssh = DummySSH(responses=[(0, "", ""), (0, "no\n", ""), (0, "", "")])
     ok = ProxyManager(ssh).write_bootstrap_caddyfile("example.com {\n}\n")
     assert ok is True
     assert "mkdir -p" in ssh.executed[0]
-    assert PROXY_BOOTSTRAP_CADDYFILE_REMOTE in ssh.executed[1]
-    assert "deploy proxy is healthy but no routes are configured" in ssh.executed[1]
+    assert "if [ -d" in ssh.executed[1]
+    assert PROXY_BOOTSTRAP_CADDYFILE_REMOTE in ssh.executed[2]
+    assert "deploy proxy is healthy but no routes are configured" in ssh.executed[2]
+
+
+def test_write_bootstrap_caddyfile_recovers_when_path_is_directory():
+    ssh = DummySSH(responses=[(0, "", ""), (0, "yes\n", ""), (0, "", ""), (0, "", "")])
+    ok = ProxyManager(ssh).write_bootstrap_caddyfile("example.com {\n}\n")
+
+    assert ok is True
+    assert "if [ -d" in ssh.executed[1]
+    assert "rm -rf" in ssh.executed[2]
+    assert PROXY_BOOTSTRAP_CADDYFILE_REMOTE in ssh.executed[2]
+    assert PROXY_BOOTSTRAP_CADDYFILE_REMOTE in ssh.executed[3]
 
 
 def test_render_bootstrap_caddyfile_default_fallback():
@@ -344,11 +356,12 @@ def test_render_bootstrap_caddyfile_appends_existing_content():
 
 
 def test_backup_native_caddyfile_success():
-    ssh = DummySSH(responses=[(0, "", ""), (0, "", "")])
+    ssh = DummySSH(responses=[(0, "", ""), (0, "no\n", ""), (0, "", "")])
     ok = ProxyManager(ssh).backup_native_caddyfile("example.com {\n}\n")
     assert ok is True
     assert "mkdir -p" in ssh.executed[0]
-    assert PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE in ssh.executed[1]
+    assert "if [ -d" in ssh.executed[1]
+    assert PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE in ssh.executed[2]
 
 
 def test_rewrite_native_caddyfile_for_container_localhost():

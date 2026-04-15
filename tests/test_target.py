@@ -15,12 +15,15 @@ from deploy.target import (
 
 
 def test_is_local_host_aliases():
+    assert is_local_host("local") is True
     assert is_local_host("localhost") is True
     assert is_local_host("127.0.0.1") is True
+    assert is_local_host("::1") is True
     assert is_local_host("example.com") is False
 
 
 def test_resolve_target_prefers_localhost():
+    assert resolve_target("remote", "local") == "local"
     assert resolve_target("remote", "localhost") == "local"
     assert resolve_target("remote", "example.com") == "remote"
 

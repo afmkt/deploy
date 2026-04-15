@@ -173,6 +173,17 @@ def connection_args(profile: ConnectionProfile) -> dict[str, Any]:
     }
 
 
+def connection_args_from_connection(connection: Any) -> dict[str, Any]:
+    """Return config-safe connection args using the active connection state."""
+    return {
+        "host": getattr(connection, "host", ""),
+        "port": getattr(connection, "port", DEFAULT_SSH_PORT),
+        "username": getattr(connection, "username", ""),
+        "key": getattr(connection, "key_filename", ""),
+        "target": "local" if getattr(connection, "is_local", False) else "remote",
+    }
+
+
 def load_defaulted_value(current: Any, default: Any, saved_args: Mapping[str, Any], key: str) -> Any:
     """Return a saved value when the caller is still using its default."""
     if current == default and key in saved_args:

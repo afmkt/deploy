@@ -36,13 +36,10 @@ def render_bootstrap_caddyfile(caddyfile_content: str = "") -> str:
     """
     base = caddyfile_content.strip()
     fallback = (
-        "http://localhost {\n"
-        "    handle_path /healthz {\n"
-        '        respond "deploy proxy is healthy but no routes are configured" 200\n'
-        "    }\n"
-        '    respond "deploy proxy is running but no routes match this host" 404\n'
-        "}\n\n"
         ":80 {\n"
+        "    handle_path /healthz {\n"
+        '        respond "deploy proxy is healthy" 200\n'
+        "    }\n"
         '    respond "deploy proxy is running but no routes match this host" 404\n'
         "}\n"
     )

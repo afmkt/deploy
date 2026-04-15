@@ -325,7 +325,7 @@ def test_write_bootstrap_caddyfile_success():
     assert "mkdir -p" in ssh.executed[0]
     assert "if [ -d" in ssh.executed[1]
     assert PROXY_BOOTSTRAP_CADDYFILE_REMOTE in ssh.executed[2]
-    assert "deploy proxy is healthy but no routes are configured" in ssh.executed[2]
+    assert "deploy proxy is healthy" in ssh.executed[2]
 
 
 def test_write_bootstrap_caddyfile_recovers_when_path_is_directory():
@@ -341,16 +341,16 @@ def test_write_bootstrap_caddyfile_recovers_when_path_is_directory():
 
 def test_render_bootstrap_caddyfile_default_fallback():
     content = render_bootstrap_caddyfile("")
-    assert 'http://localhost {' in content
-    assert 'handle_path /healthz {' in content
-    assert 'respond "deploy proxy is healthy but no routes are configured" 200' in content
-    assert 'respond "deploy proxy is running but no routes match this host" 404' in content
+    assert 'http://localhost {' not in content
     assert ':80 {' in content
+    assert 'handle_path /healthz {' in content
+    assert 'respond "deploy proxy is healthy" 200' in content
+    assert 'respond "deploy proxy is running but no routes match this host" 404' in content
 
 
 def test_render_bootstrap_caddyfile_appends_existing_content():
     content = render_bootstrap_caddyfile("example.com {\n    reverse_proxy localhost:3000\n}\n")
-    assert 'http://localhost {' in content
+    assert 'http://localhost {' not in content
     assert 'example.com {' in content
 def test_rewrite_native_caddyfile_for_container_localhost():
     mgr = ProxyManager(DummySSH())

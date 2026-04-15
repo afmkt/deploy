@@ -111,6 +111,29 @@ def _resolve_service_image(image: str | None, service_name: str, svc_mgr: Servic
     return None
 
 
+def _resolve_service_domain(domain: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
+    """Resolve service domain from CLI, local metadata, or remote metadata."""
+    if domain:
+        return domain
+
+    local_metadata_path = Path(".deploy-service.json")
+    if local_metadata_path.exists():
+        try:
+            local_metadata = json.loads(local_metadata_path.read_text())
+            local_domain = local_metadata.get("domain")
+            if local_domain:
+                return local_domain
+        except Exception:
+            pass
+
+    remote_metadata = svc_mgr.read_service_metadata(service_name)
+    if remote_metadata:
+        remote_domain = remote_metadata.get("domain")
+        if remote_domain:
+            return remote_domain
+    return None
+
+
 def _resolve_service_deploy_path(
     config: DeployConfig,
     use_config: bool,
@@ -1116,14 +1139,14 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
     console.print(f"[green]✓ Wrote {metadata_path}[/green]")
 
     console.print("\n[bold green]✓ Service initialised[/bold green]")
-    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
+    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image> (or --target local)[/dim]")
 
 
 @service.command(name="deploy")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--image", "-i",
               help="Docker image to run (optional if present in service metadata)")
-@click.option("--domain", "-d", required=True,
+@click.option("--domain", "-d",
               help="Public domain / hostname")
 @click.option("--port", type=int, default=8000,
               help="App port inside the container")
@@ -1165,18 +1188,32 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
 
     requested_networks = normalize_ingress_networks(ingress_networks)
 
-    console.print(Panel.fit(
-        f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
-        f"Image: {image or '<auto-resolve>'}  Domain: {domain}  Port: {port}\n"
-        f"Target: {display_target(ssh)}\n"
-        f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
-        border_style="blue",
-    ))
-
     try:
         with managed_connection(ssh):
             svc_mgr = ServiceManager(ssh)
             proxy_mgr = ProxyManager(ssh)
+
+            domain = _resolve_service_domain(domain, service_name, svc_mgr)
+            if not domain:
+                if not interactive:
+                    console.print(
+                        "[red]✗ Domain is required in non-interactive mode. Provide --domain or save domain in metadata.[/red]"
+                    )
+                    sys.exit(1)
+                from rich.prompt import Prompt
+
+                domain = Prompt.ask("Public domain / hostname")
+                if not domain:
+                    console.print("[red]✗ Domain is required[/red]")
+                    sys.exit(1)
+
+            console.print(Panel.fit(
+                f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
+                f"Image: {image or '<auto-resolve>'}  Domain: {domain}  Port: {port}\n"
+                f"Target: {display_target(ssh)}\n"
+                f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
+                border_style="blue",
+            ))
 
         # Step 1: check ingress proxy is running
             console.print("\n[bold]Step 1: Check ingress proxy[/bold]")

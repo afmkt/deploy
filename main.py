@@ -1458,6 +1458,10 @@ def service_status(name, host, port, username, key, password, use_config, target
             if status:
                 colour = "green" if status == "running" else "yellow"
                 console.print(f"[{colour}]Service '{service_name}': {status}[/{colour}]")
+                logs = mgr.get_logs(service_name, lines=20)
+                if logs.strip():
+                    console.print("\n[bold]Recent logs:[/bold]")
+                    console.print(logs.rstrip())
             else:
                 console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
     except ConnectionError:

@@ -789,3 +789,119 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
         assert result.exit_code == 0, result.output
         assert "image: repo/app:latest" in calls["compose"]
     assert "http://localhost/healthz" in result.output
+
+
+def test_service_status_shows_logs(monkeypatch):
+    """service status displays recent container logs alongside the status."""
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_logs(self, service_name, lines=20):
+            return "INFO: Application startup complete.\nINFO: Uvicorn running on http://0.0.0.0:8000\n"
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, ["status", "--name", "myapp", "--target", "local", "--no-use-config"])
+
+    assert result.exit_code == 0, result.output
+    assert "myapp" in result.output
+    assert "running" in result.output
+    assert "Recent logs" in result.output
+    assert "Application startup complete" in result.output
+
+
+def test_service_status_restarting_shows_logs(monkeypatch):
+    """service status shows logs for a restarting container to aid diagnosis."""
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self, service_name):
+            return "restarting"
+
+        def get_logs(self, service_name, lines=20):
+            return "error: Failed to spawn: `uvicorn`\n  Caused by: No such file or directory (os error 2)\n"
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+
+    assert result.exit_code == 0, result.output
+    assert "restarting" in result.output
+    assert "Recent logs" in result.output
+    assert "Failed to spawn" in result.output
+
+
+def test_service_status_no_logs_skips_section(monkeypatch):
+    """service status omits the log section when the container has no output."""
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_logs(self, service_name, lines=20):
+            return ""
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, ["status", "--name", "myapp", "--target", "local", "--no-use-config"])
+
+    assert result.exit_code == 0, result.output
+    assert "Recent logs" not in result.output

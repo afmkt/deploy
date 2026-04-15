@@ -20,6 +20,8 @@ This repository is prepared for open-source use as a binary CLI tool.
 - Native Caddy bootstrap and port handoff is supported.
 - Proxy operation is bridge-mode only.
 - `service` command group scaffolds and deploys Docker-based services. Domain routing is explicit and fail-safe.
+- Path-based routing allows multiple services to share one domain via `--path-prefix`.
+- Internal-only services (caches, sidecars) can be deployed with `--internal` to suppress public routing.
 
 ## Requirements
 
@@ -206,11 +208,25 @@ Useful options:
 
 - `--ingress-network <name>`: External network that this service joins for caddy routing (default: `ingress`).
 - `--global-ingress`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
+- `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain (e.g. `/api/auth`). Allows multiple services to share one domain via path-based routing.
+- `--internal`: Mark the service as internal-only — no Caddy labels, no ingress network. The container is reachable only by other containers on the same Docker network. `--domain` is optional when `--internal` is set.
 
 Example with isolated app network:
 
 ```sh
 deploy service init -d api.example.com --ingress-network app-a
+```
+
+Example with a path prefix (API lives at `/api/auth` on a shared domain):
+
+```sh
+deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
+```
+
+Example for an internal service (no public routing):
+
+```sh
+deploy service init --name session-store --internal
 ```
 
 This generates:
@@ -241,6 +257,8 @@ Useful options:
 - `--allow-remote-domain-fallback`: Opt in to reusing the domain persisted on the target when `--domain` is omitted. Not recommended; prefer always providing `--domain`.
 - `--ingress-network <name>`: Use the same network name configured in `proxy up`.
 - `--global-ingress`: Attach the service to every ingress network currently configured on the proxy. When `proxy up` later changes its ingress networks, globally exposed services are re-applied automatically.
+- `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain. The prefix is stripped before the request reaches the upstream container.
+- `--internal`: No Caddy labels, no ingress network. `--domain` is not required.
 - `--target local`: Deploy to the current machine instead of a remote host.
 
 #### Domain Resolution Order
@@ -298,6 +316,41 @@ deploy service deploy -i <image:tag> -d api.example.com \
     --global-ingress \
     --host <host> --username <user> --key <ssh_key>
 ```
+
+### Path-Based Routing — Multiple Services on One Domain
+
+When several services share a domain, use `--path-prefix` to assign each one a
+path scope. The root-owning service (no prefix) catches all unmatched traffic;
+prefixed services only handle requests under their path.
+
+```sh
+# Auth UI — owns the domain root
+deploy service deploy -d auth.example.com --name auth-ui -i auth-ui:latest \
+    --host <host> --username <user> --key <ssh_key>
+
+# Auth API — owns /api/auth/* only; prefix is stripped before forwarding
+deploy service deploy -d auth.example.com --name auth-api -i auth-api:latest \
+    --path-prefix /api/auth \
+    --host <host> --username <user> --key <ssh_key>
+```
+
+Both containers must join the same ingress network. Caddy merges them into one
+virtual host. `handle_path` strips the prefix before the request reaches the
+upstream, so the service sees `/login` for an incoming `/api/auth/login` request.
+
+### Internal Services — No Public Routing
+
+For caches, databases, background workers, and other containers that must not be
+exposed to the internet, use `--internal`. No Caddy labels or ingress network
+membership are added.
+
+```sh
+deploy service deploy --name session-store --internal -i redis:alpine \
+    --host <host> --username <user> --key <ssh_key>
+```
+
+`--domain` is optional for internal services. The container is reachable by name
+from other containers on the same Docker Compose project network.
 
 Recommended shared-host pattern:
 

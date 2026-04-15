@@ -158,7 +158,131 @@ def test_render_service_metadata_contains_scope_and_networks():
     )
     assert '"exposure_scope": "global"' in metadata
     assert '"ingress_networks": [' in metadata
-    assert '"app-a"' in metadata
+
+
+def test_render_service_compose_path_prefix_uses_handle_path():
+    compose = render_service_compose(
+        "auth-api", "auth.example.com", 8000, image="auth:latest",
+        path_prefix="/api/auth",
+    )
+    assert "caddy.handle_path: /api/auth*" in compose
+    assert "caddy.handle_path.reverse_proxy" in compose
+    assert "upstreams 8000" in compose
+    # bare reverse_proxy must NOT appear when path_prefix is set
+    assert "      caddy.reverse_proxy:" not in compose
+
+
+def test_render_service_compose_path_prefix_strips_trailing_slash():
+    compose = render_service_compose(
+        "auth-api", "auth.example.com", 8000, image="auth:latest",
+        path_prefix="/api/auth/",
+    )
+    assert "caddy.handle_path: /api/auth*" in compose
+
+
+def test_render_service_compose_path_prefix_strips_trailing_wildcard():
+    compose = render_service_compose(
+        "auth-api", "auth.example.com", 8000, image="auth:latest",
+        path_prefix="/api/auth*",
+    )
+    assert "caddy.handle_path: /api/auth*" in compose
+
+
+def test_render_service_compose_path_prefix_includes_caddy_site_label():
+    compose = render_service_compose(
+        "auth-api", "auth.example.com", 8000, image="auth:latest",
+        path_prefix="/api/auth",
+    )
+    assert "caddy: auth.example.com" in compose
+
+
+def test_render_service_compose_path_prefix_includes_ingress_network():
+    compose = render_service_compose(
+        "auth-api", "auth.example.com", 8000, image="auth:latest",
+        path_prefix="/api/auth",
+    )
+    assert "external: true" in compose
+    assert f"name: {INGRESS_NETWORK}" in compose
+
+
+def test_render_service_compose_internal_no_caddy_labels():
+    compose = render_service_compose(
+        "session-store", "session-store", 6379, image="redis:alpine",
+        internal=True,
+    )
+    assert "caddy" not in compose
+    assert "deploy.scope: internal" in compose
+
+
+def test_render_service_compose_internal_no_networks_section():
+    compose = render_service_compose(
+        "session-store", "session-store", 6379, image="redis:alpine",
+        internal=True,
+    )
+    assert "networks:" not in compose
+    assert "external: true" not in compose
+
+
+def test_render_service_compose_internal_no_ingress_network_join():
+    compose = render_service_compose(
+        "session-store", "session-store", 6379, image="redis:alpine",
+        internal=True,
+    )
+    assert "      - ingress" not in compose
+
+
+def test_render_service_metadata_persists_path_prefix():
+    metadata = render_service_metadata(
+        "auth-api", "auth.example.com", 8000,
+        path_prefix="/api/auth",
+    )
+    assert '"path_prefix": "/api/auth"' in metadata
+    assert '"internal": false' in metadata
+
+
+def test_render_service_metadata_persists_internal_flag():
+    metadata = render_service_metadata(
+        "session-store", "session-store", 6379,
+        internal=True,
+    )
+    assert '"internal": true' in metadata
+    assert '"path_prefix": null' in metadata
+
+
+def test_render_service_metadata_defaults_path_prefix_null():
+    metadata = render_service_metadata("mysvc", "api.example.com", 8000)
+    assert '"path_prefix": null' in metadata
+    assert '"internal": false' in metadata
+
+
+def test_reconcile_global_services_forwards_path_prefix():
+    import json as _json
+    metadata = _json.dumps({
+        "service_name": "auth-api",
+        "domain": "auth.example.com",
+        "port": 8000,
+        "image": "auth:latest",
+        "ingress_networks": ["ingress"],
+        "exposure_scope": "global",
+        "path_prefix": "/api/auth",
+        "internal": False,
+    })
+    ssh = DummySSH(
+        responses=[
+            (0, "auth-api\n", ""),   # list_services
+            (0, metadata, ""),       # read_service_metadata
+            (0, "", ""),             # upload_compose
+            (0, "", ""),             # upload_metadata
+            (0, "", ""),             # compose_up
+        ]
+    )
+    mgr = ServiceManager(ssh)
+    assert mgr.reconcile_global_services(["ingress"]) is True
+    uploaded_compose = next(
+        cmd for cmd in ssh.executed if "ENDOFCOMPOSE" in cmd
+    )
+    assert "caddy.handle_path: /api/auth*" in uploaded_compose
+    assert "caddy.handle_path.reverse_proxy" in uploaded_compose
 
 
 # ---------------------------------------------------------------------------

@@ -1106,8 +1106,8 @@ def service():
 
 
 @service.command(name="init")
-@click.option("--domain", "-d", required=True,
-              help="Public domain or hostname for this service (e.g. api.example.com)")
+@click.option("--domain", "-d", default=None,
+              help="Public domain or hostname for this service (e.g. api.example.com). Required unless --internal is set.")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--port", type=int, help="App port inside container (auto-detected for FastAPI)")
 @click.option("--image", "-i",
@@ -1116,9 +1116,15 @@ def service():
               help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
 @click.option("--global-ingress/--no-global-ingress", default=False,
               help="Attach the service to every configured ingress network instead of just one")
+@click.option("--path-prefix", default=None,
+              help="Route only traffic under this path prefix on the shared domain (e.g. /api/auth). "
+                   "Allows multiple services to share one domain via path-based routing.")
+@click.option("--internal", is_flag=True, default=False,
+              help="Mark this service as internal-only: no caddy labels, no ingress network. "
+                   "The container is reachable only by other containers on the same Docker network.")
 @click.option("--force", is_flag=True,
               help="Overwrite existing Dockerfile / docker-compose.yml")
-def service_init(domain, name, port, image, ingress_networks, global_ingress, force):
+def service_init(domain, name, port, image, ingress_networks, global_ingress, path_prefix, internal, force):
     """Scaffold Dockerfile and docker-compose.yml for a FastAPI service.
 
     Run inside the project directory.  Detects FastAPI entrypoint automatically.
@@ -1128,13 +1134,20 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
     # Derive service name from directory if not given
     service_name = name or project_dir.resolve().name
 
+    if not domain and not internal:
+        raise click.UsageError("--domain is required unless --internal is set")
+    if not domain:
+        domain = service_name
+
     # Detect FastAPI entrypoint
     ep_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
     effective_port = port or default_port
 
     console.print(Panel.fit(
         f"[bold blue]Service init — {service_name}[/bold blue]\n"
-        f"Domain: {domain}  Port: {effective_port}",
+        f"Domain: {domain}  Port: {effective_port}"
+        + (f"  Path: {path_prefix}" if path_prefix else "")
+        + ("  [internal]" if internal else ""),
         border_style="blue",
     ))
     console.print(f"[dim]Detected entrypoint: {ep_file} → {app_str}[/dim]")
@@ -1159,6 +1172,8 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
             image=image,
             ingress_networks=ingress_networks,
             exposure_scope="global" if global_ingress else "single",
+            path_prefix=path_prefix,
+            internal=internal,
         )
         compose_path.write_text(compose_content)
         console.print(f"[green]✓ Wrote {compose_path}[/green]")
@@ -1174,6 +1189,8 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
             image=image,
             ingress_networks=ingress_networks,
             exposure_scope="global" if global_ingress else "single",
+            path_prefix=path_prefix,
+            internal=internal,
         )
     )
     console.print(f"[green]✓ Wrote {metadata_path}[/green]")
@@ -1203,6 +1220,12 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
               help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
 @click.option("--global-ingress/--no-global-ingress", default=False,
               help="Attach the service to every configured ingress network instead of just one")
+@click.option("--path-prefix", default=None,
+              help="Route only traffic under this path prefix on the shared domain (e.g. /api/auth). "
+                   "Allows multiple services to share one domain via path-based routing.")
+@click.option("--internal", is_flag=True, default=False,
+              help="Mark this service as internal-only: no caddy labels, no ingress network. "
+                   "The container is reachable only by other containers on the same Docker network.")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -1215,7 +1238,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 @click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to deploy to a remote SSH host or the local machine")
 def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote_domain_fallback, missing_image_action, auto_sync_context,
-                   ingress_networks, global_ingress, host, ssh_port, username, key,
+                   ingress_networks, global_ingress, path_prefix, internal, host, ssh_port, username, key,
                    password, use_config, interactive, target):
     """Deploy a service image to the deployment target and register with ingress.
 
@@ -1236,25 +1259,34 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote
             svc_mgr = ServiceManager(ssh)
             proxy_mgr = ProxyManager(ssh)
 
+            # Internal services don't need a routable domain; use the service
+            # name as a stable placeholder so metadata remains well-formed.
+            if internal and not domain:
+                domain = service_name
+
             domain, domain_source = _resolve_service_domain_with_source(domain, service_name, svc_mgr)
             if not domain:
-                if not interactive:
+                if internal:
+                    domain = service_name
+                elif not interactive:
                     console.print(
                         "[red]✗ Domain is required in non-interactive mode. Provide --domain or save domain in metadata.[/red]"
                     )
                     sys.exit(1)
-                from rich.prompt import Prompt
+                else:
+                    from rich.prompt import Prompt
 
-                domain = Prompt.ask("Public domain / hostname")
-                if not domain:
-                    console.print("[red]✗ Domain is required[/red]")
-                    sys.exit(1)
+                    domain = Prompt.ask("Public domain / hostname")
+                    if not domain:
+                        console.print("[red]✗ Domain is required[/red]")
+                        sys.exit(1)
 
             console.print(Panel.fit(
                 f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
                 f"Image: {image or '<auto-resolve>'}  Domain: {domain}  Port: {port}\n"
                 f"Target: {display_target(ssh)}\n"
-                f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
+                + (f"Path prefix: {path_prefix}\n" if path_prefix else "")
+                + (f"Mode: internal (no ingress)\n" if internal else f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}"),
                 border_style="blue",
             ))
 
@@ -1459,6 +1491,8 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote
                 image=image,
                 ingress_networks=effective_networks,
                 exposure_scope="global" if global_ingress else "single",
+                path_prefix=path_prefix,
+                internal=internal,
             )
             if not svc_mgr.upload_compose(service_name, compose_content):
                 sys.exit(1)
@@ -1469,6 +1503,8 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote
                 image=image,
                 ingress_networks=effective_networks,
                 exposure_scope="global" if global_ingress else "single",
+                path_prefix=path_prefix,
+                internal=internal,
             )
             if not svc_mgr.upload_metadata(service_name, metadata_content):
                 sys.exit(1)
@@ -1483,8 +1519,10 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote
 
             console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
             console.print(f"  Domain : {domain}")
+            if path_prefix:
+                console.print(f"  Path   : {path_prefix}")
             console.print(f"  Status : {status}")
-            console.print(f"  Exposure: {'global' if global_ingress else 'single-network'}")
+            console.print(f"  Exposure: {'internal' if internal else 'global' if global_ingress else 'single-network'}")
             if container_ip:
                 console.print(f"  Container IP: {container_ip}")
             config.save_args(connection_args_from_connection(ssh), "service")

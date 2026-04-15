@@ -11,10 +11,12 @@ Practical step-by-step guides for common deployment workflows.
 3. [Redeploy after code changes](#3-redeploy-after-code-changes)
 4. [Deploy a pre-built image (no source on target)](#4-deploy-a-pre-built-image-no-source-on-target)
 5. [Multi-service shared host with isolated networks](#5-multi-service-shared-host-with-isolated-networks)
-6. [Local machine target (dev / testing)](#6-local-machine-target-dev--testing)
-7. [Bring a service down](#7-bring-a-service-down)
-8. [Recover remote edits back to local](#8-recover-remote-edits-back-to-local)
-9. [Monitor and operate services interactively](#9-monitor-and-operate-services-interactively)
+6. [Path-based routing — multiple services on one domain](#6-path-based-routing--multiple-services-on-one-domain)
+7. [Internal services — no public routing](#7-internal-services--no-public-routing)
+8. [Local machine target (dev / testing)](#8-local-machine-target-dev--testing)
+9. [Bring a service down](#9-bring-a-service-down)
+10. [Recover remote edits back to local](#10-recover-remote-edits-back-to-local)
+11. [Monitor and operate services interactively](#11-monitor-and-operate-services-interactively)
 
 ---
 
@@ -244,7 +246,109 @@ services are automatically re-attached to the new network set.
 
 ---
 
-## 6. Local machine target (dev / testing)
+## 6. Path-based routing — multiple services on one domain
+
+Use this when several services share one domain name and are distinguished only
+by URL path.  For example, `auth.example.com` serves the auth UI at `/` and the
+auth API at `/api/auth`.
+
+Caddy's `handle_path` directive matches traffic under a path prefix and strips
+the prefix before forwarding, so the upstream service sees a clean path.
+
+### Example: auth UI + auth API on the same domain
+
+**Scaffold and deploy the UI** (owns the domain root — no `--path-prefix`):
+
+```sh
+# Inside the auth-ui repository
+deploy service init -d auth.example.com --name auth-ui
+deploy service deploy -d auth.example.com --name auth-ui -i auth-ui:latest
+```
+
+**Scaffold and deploy the API** (serves only `/api/auth/*`):
+
+```sh
+# Inside the auth-api repository
+deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy service deploy \
+  -d auth.example.com \
+  --name auth-api \
+  --path-prefix /api/auth \
+  -i auth-api:latest
+```
+
+The proxy merges both containers into a single virtual host.  Requests to
+`/api/auth/...` reach `auth-api`; everything else falls through to `auth-ui`.
+
+### How `--path-prefix` affects the generated compose file
+
+Without `--path-prefix` a service owns the whole domain:
+
+```yaml
+labels:
+  caddy: auth.example.com
+  caddy.reverse_proxy: "{{upstreams 8000}}"
+```
+
+With `--path-prefix /api/auth`:
+
+```yaml
+labels:
+  caddy: auth.example.com
+  caddy.handle_path: /api/auth*
+  caddy.handle_path.reverse_proxy: "{{upstreams 8000}}"
+```
+
+The `*` wildcard is appended automatically. Trailing slashes or wildcards in the
+supplied value are normalised before the label is written.
+
+### Notes
+
+- Both services must join the same ingress network so Caddy can discover them.
+- The path prefix is stripped before the request reaches the upstream.  If your
+  API is mounted at `/`, it will receive `/login` for an incoming
+  `/api/auth/login` request.
+- There is no limit on how many services can share one domain; each one must use
+  a unique, non-overlapping prefix.
+
+---
+
+## 7. Internal services — no public routing
+
+Some services (caches, databases, background workers, sidecars) must be
+reachable by other containers but must not be exposed to the internet.
+
+Pass `--internal` to suppress all Caddy labels and ingress network membership.
+The container joins only the default project network created by Docker Compose,
+so it is reachable by name from other containers in the same compose project or
+from containers explicitly added to the same network.
+
+```sh
+deploy service init --name session-store --internal
+deploy service deploy --name session-store --internal -i redis:alpine
+```
+
+`--domain` is not required for internal services.  If omitted, the service name
+is used as a placeholder in metadata so reconciliation stays consistent.
+
+The generated compose file contains no `caddy.*` labels and no `networks:`
+section:
+
+```yaml
+services:
+  session-store:
+    image: redis:alpine
+    container_name: session-store
+    expose:
+      - "6379"
+    labels:
+      deploy.scope: internal
+    restart: unless-stopped
+```
+
+---
+
+## 8. Local machine target (dev / testing)
 
 All commands accept `--target local` to run the same workflow on the current
 machine without SSH.
@@ -278,7 +382,7 @@ deploy docker-push -i myapp:dev --target local
 
 ---
 
-## 7. Bring a service down
+## 9. Bring a service down
 
 Stop and remove the containers for a service without deleting its metadata or
 compose file on the target:
@@ -302,7 +406,7 @@ deploy proxy down
 
 ---
 
-## 8. Recover remote edits back to local
+## 10. Recover remote edits back to local
 
 When the remote working tree has been edited directly (e.g. hot-patched on the
 server), pull those changes back.
@@ -346,7 +450,7 @@ deploy pull --sync-remote --branch hotfix/fix-upstream
 
 ---
 
-## 9. Monitor and operate services interactively
+## 11. Monitor and operate services interactively
 
 The monitor TUI gives a live view of service state and allows common operations
 without re-typing commands.

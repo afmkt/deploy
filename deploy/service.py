@@ -101,12 +101,23 @@ def render_service_compose(
     ingress_network: Optional[str] = None,
     ingress_networks: Optional[Sequence[str]] = None,
     exposure_scope: str = "single",
+    path_prefix: Optional[str] = None,
+    internal: bool = False,
 ) -> str:
     """Return a docker-compose.yml for a single FastAPI service.
 
     Uses caddy-docker-proxy labels for automatic ingress routing.
     The image is built locally by default; pass image= to use a pre-built image
     instead of a build directive.
+
+    When path_prefix is set (e.g. '/api/auth'), Caddy's handle_path directive
+    is used so that this service only handles traffic under that path prefix on
+    the shared domain, allowing other services to own other paths on the same
+    host.
+
+    When internal=True, no caddy labels or ingress networks are emitted.  The
+    container is reachable only by other containers on the same Docker network
+    (the default compose project network).
     """
     source_line = f"    image: {image}" if image else "    build: ."
     site_label = caddy_site_label(domain)
@@ -123,24 +134,49 @@ def render_service_compose(
         f"    container_name: {service_name}",
         "    expose:",
         f'      - "{port}"',
-        "    networks:",
     ]
-    lines.extend(f"      - {network}" for network in resolved_networks)
-    lines.extend([
-        "    labels:",
-        f"      caddy: {site_label}",
-        f'      caddy.reverse_proxy: "{{{{upstreams {port}}}}}"',
-        f"      deploy.scope: {exposure_scope}",
-        "    restart: unless-stopped",
-        "",
-        "networks:",
-    ])
-    for network in resolved_networks:
+
+    if not internal:
+        lines.append("    networks:")
+        lines.extend(f"      - {network}" for network in resolved_networks)
+
+    if internal:
         lines.extend([
-            f"  {network}:",
-            "    external: true",
-            f"    name: {network}",
+            "    labels:",
+            "      deploy.scope: internal",
+            "    restart: unless-stopped",
         ])
+    elif path_prefix:
+        matcher = path_prefix.rstrip("/*") + "*"
+        lines.extend([
+            "    labels:",
+            f"      caddy: {site_label}",
+            f"      caddy.handle_path: {matcher}",
+            f'      caddy.handle_path.reverse_proxy: "{{{{upstreams {port}}}}}"',
+            f"      deploy.scope: {exposure_scope}",
+            "    restart: unless-stopped",
+        ])
+    else:
+        lines.extend([
+            "    labels:",
+            f"      caddy: {site_label}",
+            f'      caddy.reverse_proxy: "{{{{upstreams {port}}}}}"',
+            f"      deploy.scope: {exposure_scope}",
+            "    restart: unless-stopped",
+        ])
+
+    if not internal:
+        lines.extend([
+            "",
+            "networks:",
+        ])
+        for network in resolved_networks:
+            lines.extend([
+                f"  {network}:",
+                "    external: true",
+                f"    name: {network}",
+            ])
+
     return "\n".join(lines) + "\n"
 
 
@@ -151,6 +187,8 @@ def render_service_metadata(
     image: Optional[str] = None,
     ingress_networks: Optional[Sequence[str]] = None,
     exposure_scope: str = "single",
+    path_prefix: Optional[str] = None,
+    internal: bool = False,
 ) -> str:
     """Render persisted metadata for a deployed service."""
     payload = {
@@ -160,6 +198,8 @@ def render_service_metadata(
         "image": image,
         "ingress_networks": normalize_ingress_networks(ingress_networks),
         "exposure_scope": exposure_scope,
+        "path_prefix": path_prefix,
+        "internal": internal,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -338,6 +378,8 @@ class ServiceManager:
                 image=metadata.get("image"),
                 ingress_networks=resolved_networks,
                 exposure_scope="global",
+                path_prefix=metadata.get("path_prefix"),
+                internal=metadata.get("internal", False),
             )
             metadata_content = render_service_metadata(
                 service_name=metadata.get("service_name", service_name),
@@ -346,6 +388,8 @@ class ServiceManager:
                 image=metadata.get("image"),
                 ingress_networks=resolved_networks,
                 exposure_scope="global",
+                path_prefix=metadata.get("path_prefix"),
+                internal=metadata.get("internal", False),
             )
 
             if not self.upload_compose(service_name, compose_content):

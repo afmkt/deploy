@@ -1171,6 +1171,8 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
 @click.option("--port", type=int, default=8000,
               help="App port inside the container")
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
+@click.option("--rebuild", is_flag=True, default=False,
+              help="Force a rebuild of the image from the remote build context even if the image already exists on target")
 @click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
               help="Action when image is missing on target")
 @click.option("--auto-sync-context/--no-auto-sync-context", default=True,
@@ -1190,7 +1192,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, fo
               help="Interactive mode")
 @click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
               help="Whether to deploy to a remote SSH host or the local machine")
-def service_deploy(name, image, domain, port, deploy_path, missing_image_action, auto_sync_context,
+def service_deploy(name, image, domain, port, deploy_path, rebuild, missing_image_action, auto_sync_context,
                    ingress_networks, global_ingress, host, ssh_port, username, key,
                    password, use_config, interactive, target):
     """Deploy a service image to the deployment target and register with ingress.
@@ -1261,9 +1263,14 @@ def service_deploy(name, image, domain, port, deploy_path, missing_image_action,
                     sys.exit(1)
 
             image = resolved_image
-            if not svc_mgr.image_exists_remote(image):
-                console.print(f"[yellow]Image '{image}' not found on target.[/yellow]")
-                choice = missing_image_action
+            image_missing = not svc_mgr.image_exists_remote(image)
+            if image_missing or rebuild:
+                if rebuild and not image_missing:
+                    console.print(f"[blue]Rebuilding image '{image}' on target...[/blue]")
+                    choice = "build"
+                else:
+                    console.print(f"[yellow]Image '{image}' not found on target.[/yellow]")
+                    choice = missing_image_action
                 if choice == "ask":
                     if not interactive:
                         choice = "build"

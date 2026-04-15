@@ -736,8 +736,6 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
                 if native_caddy_content and native_caddy_content.strip():
                     native_config_path = mgr.get_native_caddyfile_path()
                     console.print(f"[green]✓ Native Caddyfile found at {native_config_path}[/green]")
-                    if not mgr.backup_native_caddyfile(native_caddy_content):
-                        sys.exit(1)
 
                     if mgr.native_config_uses_loopback_upstreams(native_caddy_content):
                         console.print(
@@ -939,10 +937,6 @@ def proxy_diagnose(host, port, username, key, password, use_config, lines, targe
                 (
                     "Bootstrap Caddyfile",
                     (mgr.get_bootstrap_caddyfile() or "<unavailable>").strip(),
-                ),
-                (
-                    "Native Caddyfile Backup",
-                    (mgr.get_native_caddyfile_backup() or "<unavailable>").strip(),
                 ),
                 (
                     "Native Caddy Status",

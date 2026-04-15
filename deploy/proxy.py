@@ -19,7 +19,6 @@ PROXY_CONTAINER = "caddy-proxy"
 PROXY_BASE_DIR = PROXY_DIR
 PROXY_COMPOSE_REMOTE = f"{PROXY_BASE_DIR}/docker-compose.yml"
 PROXY_BOOTSTRAP_CADDYFILE_REMOTE = f"{PROXY_BASE_DIR}/Caddyfile"
-PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE = f"{PROXY_BASE_DIR}/Caddyfile.native.backup"
 PROXY_HOST_GATEWAY_NAME = "host.docker.internal"
 PROXY_AUTOSAVE_CADDYFILE_REMOTE = "/config/caddy/Caddyfile.autosave"
 
@@ -128,9 +127,6 @@ class ProxyManager:
 
     def _bootstrap_caddyfile_path(self) -> str:
         return str(Path(self._proxy_base_dir()) / "Caddyfile")
-
-    def _native_caddyfile_backup_path(self) -> str:
-        return str(Path(self._proxy_base_dir()) / "Caddyfile.native.backup")
 
     def _prepare_writable_file_path(self, file_path: str, description: str) -> bool:
         """Ensure a remote file path is writable, repairing stale directory collisions."""
@@ -305,26 +301,6 @@ class ProxyManager:
         """Return the detected native Caddy config path."""
         return CaddyManager(self.ssh).get_caddy_config_path()
 
-    def backup_native_caddyfile(self, caddyfile_content: str) -> bool:
-        """Store a copy of the native Caddy config under the proxy working dir."""
-        backup_path = self._native_caddyfile_backup_path()
-        if not self._prepare_writable_file_path(backup_path, "native Caddyfile backup"):
-            return False
-
-        write_cmd = (
-            f"cat > {self._q(backup_path)} << 'ENDNATIVECADDYFILE'\n"
-            f"{caddyfile_content}\n"
-            "ENDNATIVECADDYFILE"
-        )
-        exit_code, _, stderr = self.ssh.execute(write_cmd)
-        if exit_code != 0:
-            console.print(f"[red]✗ Failed to back up native Caddyfile: {stderr.strip()}[/red]")
-            return False
-        console.print(
-            f"[green]✓ Native Caddyfile backed up to {backup_path}[/green]"
-        )
-        return True
-
     def rewrite_native_caddyfile_for_container(self, caddyfile_content: str) -> str:
         """Rewrite host-local upstreams so they still work inside a container.
 
@@ -484,10 +460,6 @@ class ProxyManager:
     def get_bootstrap_caddyfile(self) -> Optional[str]:
         """Return the mounted bootstrap Caddyfile content."""
         return self.read_remote_file(self._bootstrap_caddyfile_path())
-
-    def get_native_caddyfile_backup(self) -> Optional[str]:
-        """Return the saved backup of the native Caddy config."""
-        return self.read_remote_file(self._native_caddyfile_backup_path())
 
     def get_generated_caddyfile(self) -> Optional[str]:
         """Return the autosaved generated Caddyfile from inside the proxy container."""

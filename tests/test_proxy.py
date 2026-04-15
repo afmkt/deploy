@@ -12,7 +12,6 @@ from deploy.proxy import (
     PROXY_CONTAINER,
     PROXY_COMPOSE_REMOTE,
     PROXY_BOOTSTRAP_CADDYFILE_REMOTE,
-    PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE,
     PROXY_AUTOSAVE_CADDYFILE_REMOTE,
 )
 
@@ -353,17 +352,6 @@ def test_render_bootstrap_caddyfile_appends_existing_content():
     content = render_bootstrap_caddyfile("example.com {\n    reverse_proxy localhost:3000\n}\n")
     assert 'http://localhost {' in content
     assert 'example.com {' in content
-
-
-def test_backup_native_caddyfile_success():
-    ssh = DummySSH(responses=[(0, "", ""), (0, "no\n", ""), (0, "", "")])
-    ok = ProxyManager(ssh).backup_native_caddyfile("example.com {\n}\n")
-    assert ok is True
-    assert "mkdir -p" in ssh.executed[0]
-    assert "if [ -d" in ssh.executed[1]
-    assert PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE in ssh.executed[2]
-
-
 def test_rewrite_native_caddyfile_for_container_localhost():
     mgr = ProxyManager(DummySSH())
     original = "example.com {\n    reverse_proxy localhost:3000\n}\n"

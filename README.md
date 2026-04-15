@@ -1,6 +1,6 @@
 ## Git SSH Deploy Tool
 
-CLI toolkit for deployment to either a remote host over SSH or the local machine. It combines Git sync, Docker image transfer, reverse proxy migration/management, and service scaffolding/deploy commands.
+CLI toolkit for deployment to either a remote host over SSH or the local machine. It combines Git sync, Docker image transfer, reverse proxy bootstrap/management, and service scaffolding/deploy commands.
 
 ## Open Source Status
 
@@ -17,7 +17,7 @@ This repository is prepared for open-source use as a binary CLI tool.
 - Core operational commands support local targeting by setting `--host localhost`.
 - Docker image transfer (`docker-push`) supports remote architecture targeting.
 - `proxy` command group manages `lucaslorentz/caddy-docker-proxy`.
-- Native Caddy migration is supported.
+- Native Caddy bootstrap and port handoff is supported.
 - Proxy operation is bridge-mode only.
 - `service` command group can scaffold and deploy FastAPI-style Docker services, including globally exposed services that join every configured ingress network.
 
@@ -191,15 +191,15 @@ python main.py proxy up --use-config \
 python main.py proxy up --use-config --ingress-network app-a,app-b
 ```
 
-### Native Caddy Migration Behavior
+### Native Caddy Bootstrap Behavior
 
-When `proxy up` detects native Caddy and migration is enabled:
+When `proxy up` detects native Caddy and bootstrap handoff is enabled:
 
 1. Reads native Caddyfile.
-2. Backs it up to `/tmp/deploy/caddy-proxy/Caddyfile.native.backup`.
-3. Rewrites loopback upstreams (`localhost`, `127.0.0.1`, `127.0.1.1`, `[::1]`) to a bridge-reachable host address.
+2. Leaves the original native Caddy config file unchanged.
+3. Rewrites loopback upstreams (`localhost`, `127.0.0.1`, `127.0.1.1`, `[::1]`) to a bridge-reachable host address in the generated bootstrap content.
 4. Writes bootstrap file `/tmp/deploy/caddy-proxy/Caddyfile`.
-5. Stops native Caddy service.
+5. Stops native Caddy service so docker-caddy-proxy can bind ports `80` and `443`.
 6. Starts docker-caddy-proxy.
 
 ### Bridge Mode Prerequisite

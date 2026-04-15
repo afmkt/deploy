@@ -1591,6 +1591,34 @@ def service_status(name, host, port, username, key, password, use_config, target
         sys.exit(1)
 
 
+@service.command(name="down")
+@click.option("--name", "-n", help="Service name (defaults to current directory name)")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--port", "-p", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--target", type=TARGET_CHOICES, default="auto", show_default=True,
+              help="Whether to manage a remote SSH host or the local machine")
+def service_down(name, host, port, username, key, password, use_config, target):
+    """Stop and remove a deployed service's containers."""
+    config = DeployConfig()
+    ssh = _build_connection_from_config(config, "service", target, host, port, username, key, password, use_config)
+    if ssh is None:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    service_name = name or Path(".").resolve().name
+    try:
+        with managed_connection(ssh):
+            if not ServiceManager(ssh).compose_down(service_name):
+                sys.exit(1)
+    except ConnectionError:
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # monitor command
 # ---------------------------------------------------------------------------

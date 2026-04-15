@@ -15,15 +15,40 @@ console = Console()
 PROXY_IMAGE = "lucaslorentz/caddy-docker-proxy:latest"
 INGRESS_NETWORK = "ingress"
 PROXY_CONTAINER = "caddy-proxy"
-PROXY_COMPOSE_REMOTE = "/opt/caddy-proxy/docker-compose.yml"
-PROXY_BOOTSTRAP_CADDYFILE_REMOTE = "/opt/caddy-proxy/Caddyfile"
-PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE = "/opt/caddy-proxy/Caddyfile.native.backup"
+PROXY_BASE_DIR = "/tmp/deploy/caddy-proxy"
+PROXY_COMPOSE_REMOTE = f"{PROXY_BASE_DIR}/docker-compose.yml"
+PROXY_BOOTSTRAP_CADDYFILE_REMOTE = f"{PROXY_BASE_DIR}/Caddyfile"
+PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE = f"{PROXY_BASE_DIR}/Caddyfile.native.backup"
 PROXY_HOST_GATEWAY_NAME = "host.docker.internal"
 PROXY_AUTOSAVE_CADDYFILE_REMOTE = "/config/caddy/Caddyfile.autosave"
 
 # Caddy persistent storage on the remote host
 CADDY_DATA_VOLUME = "caddy_data"
 CADDY_CONFIG_VOLUME = "caddy_config"
+
+
+def render_bootstrap_caddyfile(caddyfile_content: str = "") -> str:
+    """Render the bootstrap Caddyfile used before dynamic routes are discovered.
+
+    When no native config is being migrated, return a small default config so
+    the proxy answers localhost requests with a clear response instead of
+    loading an empty config and resetting the connection.
+    """
+    base = caddyfile_content.strip()
+    fallback = (
+        "http://localhost {\n"
+        "    handle_path /healthz {\n"
+        '        respond "deploy proxy is healthy but no routes are configured" 200\n'
+        "    }\n"
+        '    respond "deploy proxy is running but no routes match this host" 404\n'
+        "}\n\n"
+        ":80 {\n"
+        '    respond "deploy proxy is running but no routes match this host" 404\n'
+        "}\n"
+    )
+    if not base:
+        return fallback
+    return fallback + "\n" + base + ("\n" if not base.endswith("\n") else "")
 
 
 def normalize_ingress_networks(ingress_networks: Optional[Sequence[str]] = None) -> list[str]:
@@ -44,7 +69,10 @@ def normalize_ingress_networks(ingress_networks: Optional[Sequence[str]] = None)
     return normalized or [INGRESS_NETWORK]
 
 
-def render_proxy_compose(ingress_networks: Optional[Sequence[str]] = None) -> str:
+def render_proxy_compose(
+    ingress_networks: Optional[Sequence[str]] = None,
+    bootstrap_caddyfile_path: str = PROXY_BOOTSTRAP_CADDYFILE_REMOTE,
+) -> str:
     """Render docker-compose.yml content for caddy-docker-proxy."""
     networks = normalize_ingress_networks(ingress_networks)
     ingress_list = ",".join(networks)
@@ -63,7 +91,7 @@ def render_proxy_compose(ingress_networks: Optional[Sequence[str]] = None) -> st
         "      - /var/run/docker.sock:/var/run/docker.sock:ro",
         f"      - {CADDY_DATA_VOLUME}:/data",
         f"      - {CADDY_CONFIG_VOLUME}:/config",
-        f"      - {PROXY_BOOTSTRAP_CADDYFILE_REMOTE}:/etc/caddy/Caddyfile:ro",
+        f"      - {bootstrap_caddyfile_path}:/etc/caddy/Caddyfile:ro",
         "    networks:",
     ]
     lines.extend(f"      - {name}" for name in networks)
@@ -97,9 +125,26 @@ class ProxyManager:
     def __init__(self, ssh: SSHConnection):
         self.ssh = ssh
 
+    @property
+    def is_local(self) -> bool:
+        return bool(getattr(self.ssh, "is_local", False))
+
     @staticmethod
     def _q(value: str) -> str:
         return shlex.quote(value)
+
+    def _proxy_base_dir(self) -> str:
+        """Return the base directory used for proxy runtime artifacts."""
+        return PROXY_BASE_DIR
+
+    def _proxy_compose_path(self) -> str:
+        return str(Path(self._proxy_base_dir()) / "docker-compose.yml")
+
+    def _bootstrap_caddyfile_path(self) -> str:
+        return str(Path(self._proxy_base_dir()) / "Caddyfile")
+
+    def _native_caddyfile_backup_path(self) -> str:
+        return str(Path(self._proxy_base_dir()) / "Caddyfile.native.backup")
 
     # ------------------------------------------------------------------
     # Network
@@ -134,6 +179,21 @@ class ProxyManager:
                 return False
         return True
 
+    def get_configured_ingress_networks(self) -> list[str]:
+        """Read the configured ingress networks from the deployed proxy compose file."""
+        compose_path = self._proxy_compose_path()
+        exit_code, stdout, _ = self.ssh.execute(
+            f"cat {self._q(compose_path)} 2>/dev/null"
+        )
+        if exit_code != 0 or not stdout.strip():
+            return [INGRESS_NETWORK]
+
+        pattern = r"CADDY_INGRESS_NETWORKS=([^\n\"]+)"
+        match = re.search(pattern, stdout)
+        if not match:
+            return [INGRESS_NETWORK]
+        return normalize_ingress_networks([match.group(1)])
+
     # ------------------------------------------------------------------
     # Image availability
     # ------------------------------------------------------------------
@@ -151,12 +211,16 @@ class ProxyManager:
 
     def _render_compose(self, ingress_networks: Optional[Sequence[str]] = None) -> str:
         """Return rendered ingress compose YAML."""
-        return render_proxy_compose(ingress_networks)
+        return render_proxy_compose(
+            ingress_networks,
+            bootstrap_caddyfile_path=self._bootstrap_caddyfile_path(),
+        )
 
     def deploy_compose_file(self, ingress_networks: Optional[Sequence[str]] = None) -> bool:
         """Upload the ingress proxy docker-compose.yml to the remote host."""
         compose_content = self._render_compose(ingress_networks)
-        remote_dir = str(Path(PROXY_COMPOSE_REMOTE).parent)
+        compose_path = self._proxy_compose_path()
+        remote_dir = str(Path(compose_path).parent)
 
         # Create remote directory
         exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
@@ -165,12 +229,12 @@ class ProxyManager:
             return False
 
         # Write compose file via heredoc
-        write_cmd = f"cat > {self._q(PROXY_COMPOSE_REMOTE)} << 'ENDOFCOMPOSE'\n{compose_content}\nENDOFCOMPOSE"
+        write_cmd = f"cat > {self._q(compose_path)} << 'ENDOFCOMPOSE'\n{compose_content}\nENDOFCOMPOSE"
         exit_code, _, stderr = self.ssh.execute(write_cmd)
         if exit_code != 0:
             console.print(f"[red]✗ Failed to write compose file: {stderr.strip()}[/red]")
             return False
-        console.print(f"[green]✓ Compose file deployed to {PROXY_COMPOSE_REMOTE}[/green]")
+        console.print(f"[green]✓ Compose file deployed to {compose_path}[/green]")
         return True
 
     def write_bootstrap_caddyfile(self, caddyfile_content: str) -> bool:
@@ -179,15 +243,18 @@ class ProxyManager:
         The bootstrap file lets us preserve existing native Caddy routes while
         docker label-driven routes are discovered.
         """
-        remote_dir = str(Path(PROXY_BOOTSTRAP_CADDYFILE_REMOTE).parent)
+        bootstrap_path = self._bootstrap_caddyfile_path()
+        remote_dir = str(Path(bootstrap_path).parent)
         exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
         if exit_code != 0:
             console.print(f"[red]✗ Failed to create proxy directory: {stderr.strip()}[/red]")
             return False
 
+        rendered_content = render_bootstrap_caddyfile(caddyfile_content)
+
         write_cmd = (
-            f"cat > {self._q(PROXY_BOOTSTRAP_CADDYFILE_REMOTE)} << 'ENDOFCADDYFILE'\n"
-            f"{caddyfile_content}\n"
+            f"cat > {self._q(bootstrap_path)} << 'ENDOFCADDYFILE'\n"
+            f"{rendered_content}\n"
             "ENDOFCADDYFILE"
         )
         exit_code, _, stderr = self.ssh.execute(write_cmd)
@@ -195,7 +262,7 @@ class ProxyManager:
             console.print(f"[red]✗ Failed to write bootstrap Caddyfile: {stderr.strip()}[/red]")
             return False
         console.print(
-            f"[green]✓ Bootstrap Caddyfile written to {PROXY_BOOTSTRAP_CADDYFILE_REMOTE}[/green]"
+            f"[green]✓ Bootstrap Caddyfile written to {bootstrap_path}[/green]"
         )
         return True
 
@@ -229,14 +296,15 @@ class ProxyManager:
 
     def backup_native_caddyfile(self, caddyfile_content: str) -> bool:
         """Store a copy of the native Caddy config under the proxy working dir."""
-        remote_dir = str(Path(PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE).parent)
+        backup_path = self._native_caddyfile_backup_path()
+        remote_dir = str(Path(backup_path).parent)
         exit_code, _, stderr = self.ssh.execute(f"mkdir -p {self._q(remote_dir)}")
         if exit_code != 0:
             console.print(f"[red]✗ Failed to create proxy directory: {stderr.strip()}[/red]")
             return False
 
         write_cmd = (
-            f"cat > {self._q(PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE)} << 'ENDNATIVECADDYFILE'\n"
+            f"cat > {self._q(backup_path)} << 'ENDNATIVECADDYFILE'\n"
             f"{caddyfile_content}\n"
             "ENDNATIVECADDYFILE"
         )
@@ -245,7 +313,7 @@ class ProxyManager:
             console.print(f"[red]✗ Failed to back up native Caddyfile: {stderr.strip()}[/red]")
             return False
         console.print(
-            f"[green]✓ Native Caddyfile backed up to {PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE}[/green]"
+            f"[green]✓ Native Caddyfile backed up to {backup_path}[/green]"
         )
         return True
 
@@ -354,9 +422,10 @@ class ProxyManager:
 
     def up(self) -> bool:
         """Bring up the ingress proxy via docker compose."""
+        compose_path = self._proxy_compose_path()
         console.print("[blue]Starting ingress proxy...[/blue]")
         exit_code, stdout, stderr = self.ssh.execute(
-            f"docker compose -f {self._q(PROXY_COMPOSE_REMOTE)} up -d --pull never"
+            f"docker compose -f {self._q(compose_path)} up -d --pull never"
         )
         if exit_code != 0:
             console.print(f"[red]✗ Failed to start ingress proxy: {stderr.strip()}[/red]")
@@ -366,9 +435,10 @@ class ProxyManager:
 
     def pull_and_up(self) -> bool:
         """Bring up the ingress proxy, pulling the image from remote registry if available."""
+        compose_path = self._proxy_compose_path()
         console.print("[blue]Starting ingress proxy (pulling image if available)...[/blue]")
         exit_code, stdout, stderr = self.ssh.execute(
-            f"docker compose -f {self._q(PROXY_COMPOSE_REMOTE)} up -d"
+            f"docker compose -f {self._q(compose_path)} up -d"
         )
         if exit_code != 0:
             console.print(f"[red]✗ Failed to start ingress proxy: {stderr.strip()}[/red]")
@@ -378,9 +448,10 @@ class ProxyManager:
 
     def down(self) -> bool:
         """Stop and remove the ingress proxy container."""
+        compose_path = self._proxy_compose_path()
         console.print("[blue]Stopping ingress proxy...[/blue]")
         exit_code, _, stderr = self.ssh.execute(
-            f"docker compose -f {self._q(PROXY_COMPOSE_REMOTE)} down"
+            f"docker compose -f {self._q(compose_path)} down"
         )
         if exit_code != 0:
             console.print(f"[red]✗ Failed to stop ingress proxy: {stderr.strip()}[/red]")
@@ -404,11 +475,11 @@ class ProxyManager:
 
     def get_bootstrap_caddyfile(self) -> Optional[str]:
         """Return the mounted bootstrap Caddyfile content."""
-        return self.read_remote_file(PROXY_BOOTSTRAP_CADDYFILE_REMOTE)
+        return self.read_remote_file(self._bootstrap_caddyfile_path())
 
     def get_native_caddyfile_backup(self) -> Optional[str]:
         """Return the saved backup of the native Caddy config."""
-        return self.read_remote_file(PROXY_NATIVE_CADDYFILE_BACKUP_REMOTE)
+        return self.read_remote_file(self._native_caddyfile_backup_path())
 
     def get_generated_caddyfile(self) -> Optional[str]:
         """Return the autosaved generated Caddyfile from inside the proxy container."""

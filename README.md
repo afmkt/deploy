@@ -1,6 +1,6 @@
 ## Git SSH Deploy Tool
 
-CLI toolkit for remote deployment over SSH. It combines Git sync, Docker image transfer, reverse proxy migration/management, and service scaffolding/deploy commands.
+CLI toolkit for deployment to either a remote host over SSH or the local machine. It combines Git sync, Docker image transfer, reverse proxy migration/management, and service scaffolding/deploy commands.
 
 ## Open Source Status
 
@@ -14,19 +14,20 @@ This repository is prepared for open-source use as a binary CLI tool.
 ## Current Status
 
 - Git push/pull workflows are stable.
+- Core operational commands support local targeting by setting `--host localhost`.
 - Docker image transfer (`docker-push`) supports remote architecture targeting.
 - `proxy` command group manages `lucaslorentz/caddy-docker-proxy`.
 - Native Caddy migration is supported.
 - Proxy operation is bridge-mode only.
-- `service` command group can scaffold and deploy FastAPI-style Docker services.
+- `service` command group can scaffold and deploy FastAPI-style Docker services, including globally exposed services that join every configured ingress network.
 
 ## Requirements
 
 - Python 3.12+
 - `uv` for local development/build workflows
 - Docker available locally (for `docker-push`)
-- Docker available on remote host
-- SSH access to remote host
+- Docker available on the target machine
+- SSH access to remote host when not using `--host localhost`
 - Local virtual environment (recommended):
 
 ```sh
@@ -74,7 +75,6 @@ pull
 docker-push
 proxy
 service
-caddy
 monitor
 show-config
 clear-config
@@ -90,7 +90,7 @@ Global options:
 ### 1) Git Push to Remote
 
 ```sh
-python main.py push --host <host> --username <user> --key <ssh_key> --deploy-path /var/repos
+python main.py push --host <host> --username <user> --key <ssh_key> --deploy-path /tmp/deploy/repos
 ```
 
 Use saved config on later runs:
@@ -99,10 +99,22 @@ Use saved config on later runs:
 python main.py push --use-config
 ```
 
+Run the same workflow locally for testing:
+
+```sh
+python main.py push --host localhost --deploy-path /tmp/deploy/repos
+```
+
 ### 2) Git Pull from Remote
 
 ```sh
-python main.py pull --host <host> --username <user> --key <ssh_key> --deploy-path /var/repos
+python main.py pull --host <host> --username <user> --key <ssh_key> --deploy-path /tmp/deploy/repos
+```
+
+Local target example:
+
+```sh
+python main.py pull --host localhost --deploy-path /tmp/deploy/repos
 ```
 
 Useful options:
@@ -124,16 +136,22 @@ python main.py pull --commit
 python main.py pull --sync-remote
 ```
 
-### 3) Push Docker Image to Remote
+### 3) Push Docker Image to Target
 
 ```sh
 python main.py docker-push -i <image:tag> --host <host> --username <user> --key <ssh_key>
 ```
 
+Local target example:
+
+```sh
+python main.py docker-push -i <image:tag> --host localhost
+```
+
 Notes:
 
-- Detects remote architecture and pulls/saves an appropriate image variant.
-- Transfers tarball via SFTP and loads image on remote host.
+- Detects target architecture and pulls/saves an appropriate image variant.
+- Transfers tarball via SFTP for remote targets, or via a local file copy for local targets.
 
 ## Proxy Management (Bridge Mode)
 
@@ -156,6 +174,7 @@ python main.py proxy down --use-config
 Useful option:
 
 - `--ingress-network <name>`: Attach proxy to one or more external networks. Repeat the option or use comma-separated values.
+- `--host localhost`: Run the proxy workflow on the current machine instead of over SSH.
 
 Examples:
 
@@ -177,9 +196,9 @@ python main.py proxy up --use-config --ingress-network app-a,app-b
 When `proxy up` detects native Caddy and migration is enabled:
 
 1. Reads native Caddyfile.
-2. Backs it up to `/opt/caddy-proxy/Caddyfile.native.backup`.
+2. Backs it up to `/tmp/deploy/caddy-proxy/Caddyfile.native.backup`.
 3. Rewrites loopback upstreams (`localhost`, `127.0.0.1`, `127.0.1.1`, `[::1]`) to a bridge-reachable host address.
-4. Writes bootstrap file `/opt/caddy-proxy/Caddyfile`.
+4. Writes bootstrap file `/tmp/deploy/caddy-proxy/Caddyfile`.
 5. Stops native Caddy service.
 6. Starts docker-caddy-proxy.
 
@@ -200,6 +219,7 @@ python main.py service init -d api.example.com
 Useful option:
 
 - `--ingress-network <name>`: External network that this service joins for caddy routing (default: `ingress`).
+- `--global-ingress`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
 
 Example with isolated app network:
 
@@ -211,8 +231,9 @@ This generates:
 
 - `Dockerfile`
 - `docker-compose.yml`
+- `.deploy-service.json`
 
-### Deploy Service to Remote
+### Deploy Service to Target
 
 ```sh
 python main.py service deploy -i <image:tag> -d api.example.com --host <host> --username <user> --key <ssh_key>
@@ -221,12 +242,22 @@ python main.py service deploy -i <image:tag> -d api.example.com --host <host> --
 Useful option:
 
 - `--ingress-network <name>`: Use the same network name configured in `proxy up`.
+- `--global-ingress`: Attach the service to every ingress network currently configured on the proxy. When `proxy up` later changes its ingress networks, globally exposed services are re-applied automatically.
+- `--host localhost`: Deploy to the current machine instead of a remote host.
 
 Example with isolated app network:
 
 ```sh
 python main.py service deploy -i <image:tag> -d api.example.com \
 	--ingress-network app-a \
+	--host <host> --username <user> --key <ssh_key>
+```
+
+Example with a globally exposed service:
+
+```sh
+python main.py service deploy -i <image:tag> -d api.example.com \
+	--global-ingress \
 	--host <host> --username <user> --key <ssh_key>
 ```
 
@@ -311,10 +342,6 @@ Notes:
 
 - CLI args override saved config values.
 - Passwords are not persisted.
-
-## Legacy Command Group
-
-`caddy` command group is still available for direct native Caddy management/import/apply flows, but current proxy-first workflows should prefer `proxy` + `service`.
 
 ## Development
 

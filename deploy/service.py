@@ -1,14 +1,15 @@
 """Service scaffolding and deployment for Docker-based FastAPI projects."""
 
+import json
 import shlex
 import textwrap
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from rich.console import Console
 
 from .ssh import SSHConnection
-from .proxy import INGRESS_NETWORK
+from .proxy import INGRESS_NETWORK, normalize_ingress_networks
 
 console = Console()
 
@@ -62,7 +63,9 @@ def render_service_compose(
     port: int,
     image: Optional[str] = None,
     build: bool = True,
-    ingress_network: str = INGRESS_NETWORK,
+    ingress_network: Optional[str] = None,
+    ingress_networks: Optional[Sequence[str]] = None,
+    exposure_scope: str = "single",
 ) -> str:
     """Return a docker-compose.yml for a single FastAPI service.
 
@@ -71,6 +74,9 @@ def render_service_compose(
     instead of a build directive.
     """
     source_line = f"    image: {image}" if image else "    build: ."
+    resolved_networks = normalize_ingress_networks(
+        ingress_networks or ([ingress_network] if ingress_network else None)
+    )
 
     lines = [
         'version: "3.8"',
@@ -82,24 +88,50 @@ def render_service_compose(
         "    expose:",
         f'      - "{port}"',
         "    networks:",
-        "      - ingress_net",
+    ]
+    lines.extend(f"      - {network}" for network in resolved_networks)
+    lines.extend([
         "    labels:",
         f"      caddy: {domain}",
         f'      caddy.reverse_proxy: "{{{{upstreams {port}}}}}"',
+        f"      deploy.scope: {exposure_scope}",
         "    restart: unless-stopped",
         "",
         "networks:",
-        "  ingress_net:",
-        "    external: true",
-        f"    name: {ingress_network}",
-    ]
+    ])
+    for network in resolved_networks:
+        lines.extend([
+            f"  {network}:",
+            "    external: true",
+            f"    name: {network}",
+        ])
     return "\n".join(lines) + "\n"
+
+
+def render_service_metadata(
+    service_name: str,
+    domain: str,
+    port: int,
+    image: Optional[str] = None,
+    ingress_networks: Optional[Sequence[str]] = None,
+    exposure_scope: str = "single",
+) -> str:
+    """Render persisted metadata for a deployed service."""
+    payload = {
+        "service_name": service_name,
+        "domain": domain,
+        "port": port,
+        "image": image,
+        "ingress_networks": normalize_ingress_networks(ingress_networks),
+        "exposure_scope": exposure_scope,
+    }
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 class ServiceManager:
     """Manages remote deployment lifecycle for a single service."""
 
-    def __init__(self, ssh: SSHConnection, remote_base: str = "/opt/services"):
+    def __init__(self, ssh: SSHConnection, remote_base: str = "/tmp/deploy/services"):
         self.ssh = ssh
         self.remote_base = remote_base
 
@@ -109,6 +141,9 @@ class ServiceManager:
 
     def _service_dir(self, service_name: str) -> str:
         return f"{self.remote_base}/{service_name}"
+
+    def _service_metadata_path(self, service_name: str) -> str:
+        return f"{self._service_dir(service_name)}/.deploy-service.json"
 
     def image_exists_remote(self, image: str) -> bool:
         """Check whether a Docker image is available on the remote host."""
@@ -142,6 +177,33 @@ class ServiceManager:
             return False
         console.print(f"[green]✓ Compose file uploaded to {remote_file}[/green]")
         return True
+
+    def upload_metadata(self, service_name: str, metadata_content: str) -> bool:
+        """Upload persisted service metadata to the target host."""
+        remote_file = self._service_metadata_path(service_name)
+        write_cmd = (
+            f"cat > {self._q(remote_file)} << 'ENDOFMETADATA'\n"
+            f"{metadata_content}\n"
+            "ENDOFMETADATA"
+        )
+        exit_code, _, stderr = self.ssh.execute(write_cmd)
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to upload service metadata: {stderr.strip()}[/red]")
+            return False
+        console.print(f"[green]✓ Service metadata uploaded to {remote_file}[/green]")
+        return True
+
+    def read_service_metadata(self, service_name: str) -> Optional[dict]:
+        """Return persisted metadata for a deployed service, if available."""
+        metadata_path = self._service_metadata_path(service_name)
+        exit_code, stdout, _ = self.ssh.execute(f"cat {self._q(metadata_path)} 2>/dev/null")
+        if exit_code != 0 or not stdout.strip():
+            return None
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            console.print(f"[yellow]⚠ Invalid service metadata for '{service_name}'[/yellow]")
+            return None
 
     def compose_up(self, service_name: str) -> bool:
         """Start the service via docker compose."""
@@ -196,6 +258,40 @@ class ServiceManager:
         if exit_code != 0:
             return []
         return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+    def reconcile_global_services(self, ingress_networks: Optional[Sequence[str]] = None) -> bool:
+        """Re-render and restart globally exposed services for the active ingress networks."""
+        resolved_networks = normalize_ingress_networks(ingress_networks)
+        for service_name in self.list_services():
+            metadata = self.read_service_metadata(service_name)
+            if not metadata or metadata.get("exposure_scope") != "global":
+                continue
+
+            compose_content = render_service_compose(
+                service_name=metadata.get("service_name", service_name),
+                domain=metadata["domain"],
+                port=int(metadata["port"]),
+                image=metadata.get("image"),
+                ingress_networks=resolved_networks,
+                exposure_scope="global",
+            )
+            metadata_content = render_service_metadata(
+                service_name=metadata.get("service_name", service_name),
+                domain=metadata["domain"],
+                port=int(metadata["port"]),
+                image=metadata.get("image"),
+                ingress_networks=resolved_networks,
+                exposure_scope="global",
+            )
+
+            if not self.upload_compose(service_name, compose_content):
+                return False
+            if not self.upload_metadata(service_name, metadata_content):
+                return False
+            if not self.compose_up(service_name):
+                return False
+
+        return True
 
     def get_status(self, service_name: str) -> Optional[str]:
         """Return the running state of the service container, or None."""

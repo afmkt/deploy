@@ -8,9 +8,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from deploy.git import GitRepository
+from deploy.local import LocalConnection
 from deploy.ssh import SSHConnection
 from deploy.remote import RemoteServer
-from deploy.caddy import CaddyManager
+from deploy.target import (
+    display_target,
+    docker_push_args_for_connection,
+    import_source_label,
+    is_local_connection,
+    needs_remote_identity,
+    proxy_healthcheck_url,
+    resolve_target,
+)
 from deploy.docker import DockerManager, _safe_image_filename
 from deploy.proxy import (
     ProxyManager,
@@ -22,6 +31,7 @@ from deploy.service import (
     ServiceManager,
     detect_fastapi_entrypoint,
     render_dockerfile,
+    render_service_metadata,
     render_service_compose,
 )
 from deploy.config import DeployConfig
@@ -33,6 +43,77 @@ from deploy.utils import (
 from deploy import __version__
 
 console = Console()
+TARGET_CHOICES = click.Choice(["remote", "local"])
+DEFAULT_DEPLOY_PATH = "/tmp/deploy/repos"
+
+
+def _build_connection(
+    target: str,
+    host: str,
+    port: int,
+    username: str,
+    key: str,
+    password: str,
+    command_timeout: float | None = None,
+):
+    """Construct the appropriate connection implementation for the target."""
+    target = resolve_target(target, host)
+    kwargs: dict[str, object] = {
+        "username": username,
+        "password": password,
+        "key_filename": key,
+    }
+    if command_timeout is not None:
+        kwargs["command_timeout"] = command_timeout
+
+    if target == "local":
+        return LocalConnection(**kwargs)
+
+    kwargs.update({"host": host, "port": port})
+    return SSHConnection(**kwargs)
+
+
+def _build_connection_from_config(
+    config: DeployConfig,
+    section: str,
+    target: str,
+    host: str,
+    port: int,
+    username: str,
+    key: str,
+    password: str,
+    use_config: bool = True,
+    command_timeout: float | None = None,
+):
+    """Return a target connection, loading missing fields from saved config."""
+    saved = config.load_args(section) if use_config else {}
+    fallback_sources = ["push", "pull", "docker-push", "proxy", "service", "monitor"]
+
+    target = resolve_target(target, host)
+    if target == "remote" and saved:
+        target = resolve_target(target, str(saved.get("host", "")))
+
+    if saved and target == "remote" and saved.get("target") == "local":
+        target = "local"
+
+    if target == "remote":
+        if (not host or not username or not key) and use_config:
+            if not saved.get("host") or not saved.get("username") or not saved.get("key"):
+                for src in fallback_sources:
+                    candidate = config.load_args(src)
+                    if candidate.get("target") == "local":
+                        continue
+                    if candidate.get("host") and candidate.get("username") and candidate.get("key"):
+                        saved = candidate
+                        break
+        host = host or saved.get("host", "")
+        port = port if port != 22 else saved.get("port", 22)
+        username = username or saved.get("username", "")
+        key = key or saved.get("key", "")
+    else:
+        username = username or saved.get("username", "")
+
+    return _build_connection(target, host, port, username, key, password, command_timeout)
 
 
 @click.command()
@@ -42,13 +123,16 @@ console = Console()
 @click.option("--username", "-u", help="SSH username")
 @click.option("--key", "-k", help="Path to SSH private key")
 @click.option("--password", help="SSH password (not recommended, use key instead)")
-@click.option("--deploy-path", "-d", default="/var/repos", help="Deploy path on remote server")
+@click.option("--deploy-path", "-d", default=DEFAULT_DEPLOY_PATH, help="Deploy path on remote server")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual push")
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+            help="Whether to deploy to a remote SSH host or the local machine")
 def main(repo_path: str, host: str, port: int, username: str, key: str,
-         password: str, deploy_path: str, interactive: bool, use_config: bool, dry_run: bool):
-    """Git SSH Deploy Tool - Sync local Git repository to remote server over SSH.
+        password: str, deploy_path: str, interactive: bool, use_config: bool, dry_run: bool,
+        target: str):
+    """Git SSH Deploy Tool - Sync local Git repository to a deployment target.
 
     This tool automates repository setup, remote configuration, and deployment
     in a single command.
@@ -75,10 +159,14 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
                 username = saved_args["username"]
             if not key and "key" in saved_args:
                 key = saved_args["key"]
-            if deploy_path == "/var/repos" and "deploy_path" in saved_args:
+            if deploy_path == DEFAULT_DEPLOY_PATH and "deploy_path" in saved_args:
                 deploy_path = saved_args["deploy_path"]
             if repo_path == "." and "repo_path" in saved_args:
                 repo_path = saved_args["repo_path"]
+            if target == "remote" and "target" in saved_args:
+                target = saved_args["target"]
+
+    target = resolve_target(target, host)
 
     # Validate local Git repository
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
@@ -90,15 +178,15 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
     console.print(f"[green]Repository name: {repo_name}[/green]")
 
     # Get connection details
-    console.print("\n[bold]Step 2: Configuring SSH connection[/bold]")
-    if interactive and not host:
+    console.print("\n[bold]Step 2: Configuring target[/bold]")
+    if target == "remote" and interactive and not host:
         conn_details = prompt_connection_details()
         host = conn_details["host"]
         port = conn_details["port"]
         username = conn_details["username"]
         key = conn_details["key_filename"]
         password = conn_details["password"]
-    else:
+    elif target == "remote":
         # Non-interactive mode - require host and username
         if not host:
             console.print("[red]✗ Host is required[/red]")
@@ -108,7 +196,7 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
             sys.exit(1)
 
     # Get deployment path
-    if interactive and deploy_path == "/var/repos":
+    if interactive and deploy_path == DEFAULT_DEPLOY_PATH:
         deploy_path = prompt_deploy_path()
 
     # Save arguments to config
@@ -119,19 +207,14 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
         "username": username,
         "key": key,
         "deploy_path": deploy_path,
+        "target": target,
     }
     config.save_args(args_to_save, "push")
     console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
 
     # Connect to remote server
-    console.print("\n[bold]Step 3: Connecting to remote server[/bold]")
-    ssh = SSHConnection(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        key_filename=key,
-    )
+    console.print("\n[bold]Step 3: Connecting to target[/bold]")
+    ssh = _build_connection(target, host, port, username, key, password)
 
     if not ssh.connect():
         sys.exit(1)
@@ -143,13 +226,13 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 
     try:
         # Setup remote deployment
-        console.print("\n[bold]Step 4: Setting up remote deployment[/bold]")
+        console.print("\n[bold]Step 4: Setting up deployment target[/bold]")
         remote = RemoteServer(ssh, deploy_path)
         current_branch = repo.get_current_branch() or "main"
         success, bare_repo_url = remote.setup_deployment(repo_name, current_branch)
 
         if not success:
-            console.print("[red]✗ Failed to setup remote deployment[/red]")
+            console.print("[red]✗ Failed to setup deployment target[/red]")
             sys.exit(1)
 
         # Add remote to local repository
@@ -160,18 +243,18 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
             sys.exit(1)
 
         # Push to remote
-        console.print("\n[bold]Step 6: Pushing to remote[/bold]")
+        console.print("\n[bold]Step 6: Pushing to deployment target[/bold]")
         if not repo.push(remote_name):
-            console.print("[red]✗ Failed to push to remote[/red]")
+            console.print("[red]✗ Failed to push to deployment target[/red]")
             sys.exit(1)
 
         # Update remote working directory
-        console.print("\n[bold]Step 7: Updating remote working directory[/bold]")
+        console.print("\n[bold]Step 7: Updating deployment working directory[/bold]")
         bare_repo_path = remote.get_bare_repo_path(repo_name)
         working_dir_path = remote.get_working_dir_path(repo_name)
         current_branch = repo.get_current_branch() or "main"
         if not remote.clone_or_update_working_dir(bare_repo_path, working_dir_path, current_branch):
-            console.print("[red]✗ Failed to update remote working directory[/red]")
+            console.print("[red]✗ Failed to update deployment working directory[/red]")
             sys.exit(1)
 
         # Get revision information
@@ -179,7 +262,7 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
         remote_revision = remote.get_remote_revision(working_dir_path)
 
         # Print summary
-        print_summary(host, repo_name, bare_repo_url, working_dir_path,
+        print_summary(import_source_label(ssh), repo_name, bare_repo_url, working_dir_path,
                      local_revision=local_revision, remote_revision=remote_revision)
 
     finally:
@@ -193,17 +276,20 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
 @click.option("--username", "-u", help="SSH username")
 @click.option("--key", "-k", help="Path to SSH private key")
 @click.option("--password", help="SSH password (not recommended, use key instead)")
-@click.option("--deploy-path", "-d", default="/var/repos", help="Deploy path on remote server")
+@click.option("--deploy-path", "-d", default=DEFAULT_DEPLOY_PATH, help="Deploy path on remote server")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--commit/--no-commit", default=False, help="Commit changes in remote working directory")
 @click.option("--sync-remote/--no-sync-remote", default=False, help="Check if remote working dir is clean, commit changes, push to bare repo, then pull")
 @click.option("--branch", "-b", help="Branch name to pull to")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without performing actual pull")
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+            help="Whether to pull from a remote SSH host or the local machine")
 def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
-         sync_remote: bool, branch: str, use_config: bool, dry_run: bool):
-    """Pull from remote repository to local.
+        sync_remote: bool, branch: str, use_config: bool, dry_run: bool,
+        target: str):
+    """Pull from deployment target repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
     """
@@ -229,10 +315,14 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                 username = saved_args["username"]
             if not key and "key" in saved_args:
                 key = saved_args["key"]
-            if deploy_path == "/var/repos" and "deploy_path" in saved_args:
+            if deploy_path == DEFAULT_DEPLOY_PATH and "deploy_path" in saved_args:
                 deploy_path = saved_args["deploy_path"]
             if repo_path == "." and "repo_path" in saved_args:
                 repo_path = saved_args["repo_path"]
+            if target == "remote" and "target" in saved_args:
+                target = saved_args["target"]
+
+    target = resolve_target(target, host)
 
     # Validate local Git repository
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
@@ -244,15 +334,15 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
     console.print(f"[green]Repository name: {repo_name}[/green]")
 
     # Get connection details
-    console.print("\n[bold]Step 2: Configuring SSH connection[/bold]")
-    if interactive and not host:
+    console.print("\n[bold]Step 2: Configuring target[/bold]")
+    if target == "remote" and interactive and not host:
         conn_details = prompt_connection_details()
         host = conn_details["host"]
         port = conn_details["port"]
         username = conn_details["username"]
         key = conn_details["key_filename"]
         password = conn_details["password"]
-    else:
+    elif target == "remote":
         # Non-interactive mode - require host and username
         if not host:
             console.print("[red]✗ Host is required[/red]")
@@ -262,7 +352,7 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
             sys.exit(1)
 
     # Get deployment path
-    if interactive and deploy_path == "/var/repos":
+    if interactive and deploy_path == DEFAULT_DEPLOY_PATH:
         deploy_path = prompt_deploy_path()
 
     # Save arguments to config
@@ -273,19 +363,14 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
         "username": username,
         "key": key,
         "deploy_path": deploy_path,
+        "target": target,
     }
     config.save_args(args_to_save, "pull")
     console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
 
     # Connect to remote server
-    console.print("\n[bold]Step 3: Connecting to remote server[/bold]")
-    ssh = SSHConnection(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        key_filename=key,
-    )
+    console.print("\n[bold]Step 3: Connecting to target[/bold]")
+    ssh = _build_connection(target, host, port, username, key, password)
 
     if not ssh.connect():
         sys.exit(1)
@@ -308,12 +393,12 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
 
         # Check if bare repository exists
         if not remote.directory_exists(bare_repo_path):
-            console.print(f"[red]✗ Remote repository does not exist: {bare_repo_path}[/red]")
+            console.print(f"[red]✗ Deployment repository does not exist: {bare_repo_path}[/red]")
             sys.exit(1)
 
         # Optional: Sync remote working directory (check clean, commit, push, then pull)
         if sync_remote:
-            console.print("\n[bold]Step 4: Checking if remote working directory is clean[/bold]")
+            console.print("\n[bold]Step 4: Checking if deployment working directory is clean[/bold]")
             has_uncommitted = remote.has_uncommitted_changes(working_dir_path)
             if has_uncommitted is None:
                 sys.exit(1)
@@ -324,15 +409,15 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
             
             if has_uncommitted or has_unpushed:
                 if has_uncommitted:
-                    console.print("[yellow]Remote working directory has uncommitted changes[/yellow]")
+                    console.print("[yellow]Deployment working directory has uncommitted changes[/yellow]")
                     # Commit changes
-                    console.print("\n[bold]Step 5: Committing changes in remote working directory[/bold]")
+                    console.print("\n[bold]Step 5: Committing changes in deployment working directory[/bold]")
                     if not remote.commit_remote_changes(working_dir_path):
-                        console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
+                        console.print("[red]✗ Failed to commit changes in deployment working directory[/red]")
                         sys.exit(1)
                 
                 if has_unpushed:
-                    console.print("[yellow]Remote working directory has unpushed commits[/yellow]")
+                    console.print("[yellow]Deployment working directory has unpushed commits[/yellow]")
                 
                 # Push changes to bare repository
                 console.print("\n[bold]Step 6: Pushing changes to bare repository[/bold]")
@@ -340,13 +425,13 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
                     console.print("[red]✗ Failed to push changes to bare repository[/red]")
                     sys.exit(1)
             else:
-                console.print("[green]✓ Remote working directory is clean and up to date[/green]")
+                console.print("[green]✓ Deployment working directory is clean and up to date[/green]")
         
         # Optional: Commit changes in remote working directory (without sync check)
         elif commit:
-            console.print("\n[bold]Step 4: Committing changes in remote working directory[/bold]")
+            console.print("\n[bold]Step 4: Committing changes in deployment working directory[/bold]")
             if not remote.commit_remote_changes(working_dir_path):
-                console.print("[red]✗ Failed to commit changes in remote working directory[/red]")
+                console.print("[red]✗ Failed to commit changes in deployment working directory[/red]")
                 sys.exit(1)
 
             # Push changes to bare repository
@@ -357,10 +442,10 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
 
         # Pull from remote to local (default action)
         step_num = 7 if sync_remote else 6
-        console.print(f"\n[bold]Step {step_num}: Pulling from remote to local[/bold]")
+        console.print(f"\n[bold]Step {step_num}: Pulling from deployment target to local[/bold]")
         # Add remote if not exists
         remote_name = "deploy"
-        bare_repo_url = f"ssh://{username}@{host}:{port}{bare_repo_path}"
+        bare_repo_url = bare_repo_path if target == "local" else f"ssh://{username}@{host}:{port}{bare_repo_path}"
         if not repo.add_remote(remote_name, bare_repo_url):
             console.print("[red]✗ Failed to add remote[/red]")
             sys.exit(1)
@@ -373,7 +458,7 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
 
         # Pull from remote
         if not repo.pull(remote_name):
-            console.print("[red]✗ Failed to pull from remote[/red]")
+            console.print("[red]✗ Failed to pull from deployment target[/red]")
             sys.exit(1)
 
         # Get revision information
@@ -418,7 +503,7 @@ def show_config():
 
 
 @click.command()
-@click.option("--command", "-c", type=click.Choice(["push", "pull", "caddy"]), help="Clear config for specific command only")
+@click.option("--command", "-c", type=click.Choice(["push", "pull"]), help="Clear config for specific command only")
 def clear_config(command: str):
     """Clear saved configuration."""
     config = DeployConfig()
@@ -429,441 +514,6 @@ def clear_config(command: str):
     else:
         config.clear_config()
         console.print("[green]✓ Cleared all configuration[/green]")
-
-
-@click.command()
-@click.option("--host", "-h", help="Remote server hostname or IP")
-@click.option("--port", "-p", default=22, help="SSH port")
-@click.option("--username", "-u", help="SSH username")
-@click.option("--key", "-k", help="Path to SSH private key")
-@click.option("--password", help="SSH password (not recommended, use key instead)")
-@click.option("--template", "-t", default="default", help="Caddy template name (default, with_tls)")
-@click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
-@click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
-@click.option("--dry-run", is_flag=True, help="Validate connection and configuration without making changes")
-@click.option("--template-dir", help="Import remote Caddyfile entries to local directory")
-@click.option("--apply", "apply_path", default=None, help="Apply template file or directory to remote server")
-@click.option("--force", is_flag=True, help="Skip confirmation prompts")
-def caddy(host: str, port: int, username: str, key: str, password: str,
-          template: str, interactive: bool, use_config: bool, dry_run: bool,
-          template_dir: str, apply_path: str, force: bool):
-    """Setup and configure Caddy reverse proxy on remote server.
-    
-    This command helps you install Caddy, analyze existing configuration,
-    and add new reverse proxy entries.
-    
-    Import mode (--template-dir):
-        Import remote Caddyfile entries to local directory.
-        Creates caddy.entry/{remote_address}/{domain}-{port}.caddy files.
-    
-    Apply mode (--apply):
-        Apply template file or directory to remote server.
-        Single file: Append or update entry in remote Caddyfile.
-        Directory: Replace entire remote Caddyfile with all templates.
-    """
-    # Display banner
-    console.print(Panel.fit(
-        "[bold blue]Git SSH Deploy Tool - Caddy Setup[/bold blue]\n"
-        "Configure Caddy reverse proxy on remote server",
-        border_style="blue"
-    ))
-
-    # Load from config if requested
-    config = DeployConfig()
-    if use_config:
-        saved_args = config.load_args("caddy")
-        if saved_args:
-            console.print("[dim]Loading arguments from config...[/dim]")
-            # Only use saved args if not explicitly provided via CLI
-            if not host and "host" in saved_args:
-                host = saved_args["host"]
-            if port == 22 and "port" in saved_args:
-                port = saved_args["port"]
-            if not username and "username" in saved_args:
-                username = saved_args["username"]
-            if not key and "key" in saved_args:
-                key = saved_args["key"]
-            if template == "default" and "template" in saved_args:
-                template = saved_args["template"]
-
-    # Get connection details
-    console.print("\n[bold]Step 1: Configuring SSH connection[/bold]")
-    if interactive and not host:
-        conn_details = prompt_connection_details()
-        host = conn_details["host"]
-        port = conn_details["port"]
-        username = conn_details["username"]
-        key = conn_details["key_filename"]
-        password = conn_details["password"]
-    else:
-        # Non-interactive mode - require host and username
-        if not host:
-            console.print("[red]✗ Host is required[/red]")
-            sys.exit(1)
-        if not username:
-            console.print("[red]✗ Username is required[/red]")
-            sys.exit(1)
-
-    # Save arguments to config
-    args_to_save = {
-        "host": host,
-        "port": port,
-        "username": username,
-        "key": key,
-        "template": template,
-    }
-    config.save_args(args_to_save, "caddy")
-    console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
-
-    # Connect to remote server
-    console.print("\n[bold]Step 2: Connecting to remote server[/bold]")
-    ssh = SSHConnection(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        key_filename=key,
-    )
-
-    if not ssh.connect():
-        sys.exit(1)
-
-    # Initialize Caddy manager
-    caddy_mgr = CaddyManager(ssh)
-
-    # Handle import operation
-    if template_dir:
-        console.print("\n[bold]Importing remote Caddyfile entries[/bold]")
-        result = caddy_mgr.import_remote_config(template_dir, host, force)
-        
-        # Show summary
-        console.print("\n[bold]Import Summary:[/bold]")
-        console.print(f"  Imported: {len(result['imported'])} template(s)")
-        console.print(f"  Skipped: {len(result['skipped'])} template(s)")
-        console.print(f"  Errors: {len(result['errors'])}")
-        
-        if result['imported']:
-            console.print("\n[bold]Imported templates:[/bold]")
-            for template_path in result['imported']:
-                console.print(f"  • {template_path}")
-        
-        if result['errors']:
-            console.print("\n[bold red]Errors:[/bold red]")
-            for error in result['errors']:
-                console.print(f"  • {error}")
-        
-        ssh.disconnect()
-        return
-
-    # Handle apply operation
-    if apply_path:
-        console.print("\n[bold]Applying template to remote server[/bold]")
-        success = caddy_mgr.apply_template(apply_path, force)
-        
-        if success:
-            # Validate configuration
-            console.print("\n[bold]Validating configuration[/bold]")
-            if caddy_mgr.validate_config():
-                # Reload Caddy
-                console.print("\n[bold]Reloading Caddy[/bold]")
-                caddy_mgr.reload_caddy()
-                console.print("\n[bold green]✓ Template applied successfully![/bold green]")
-            else:
-                console.print("\n[red]✗ Configuration validation failed[/red]")
-                sys.exit(1)
-        else:
-            console.print("\n[red]✗ Failed to apply template[/red]")
-            sys.exit(1)
-        
-        ssh.disconnect()
-        return
-
-    if dry_run:
-        console.print("\n[bold]Dry Run Analysis[/bold]")
-        console.print("=" * 50)
-        
-        # Check Caddy installation status
-        console.print("\n[bold]1. Caddy Installation Status[/bold]")
-        if caddy_mgr.is_caddy_installed():
-            version = caddy_mgr.get_caddy_version()
-            console.print(f"  [green]✓ Caddy is installed (version: {version})[/green]")
-            console.print("  [dim]No installation needed[/dim]")
-        else:
-            console.print("  [yellow]⚠ Caddy is not installed[/yellow]")
-            console.print("  [dim]Will install Caddy if run without --dry-run[/dim]")
-            os_type = caddy_mgr.detect_os()
-            if os_type:
-                console.print(f"  [dim]Detected OS: {os_type}[/dim]")
-            else:
-                console.print("  [dim]Could not detect OS type[/dim]")
-        
-        # Analyze current configuration
-        console.print("\n[bold]2. Current Caddy Configuration[/bold]")
-        config_content = caddy_mgr.read_caddy_config()
-        if config_content:
-            config_path = caddy_mgr.get_caddy_config_path()
-            console.print(f"  Config file: {config_path}")
-            
-            # Parse detailed configuration
-            detailed_config = caddy_mgr.parse_detailed_config(config_content)
-            
-            # Show domain configurations
-            if detailed_config['domains']:
-                console.print(f"\n  [bold]Domain-based Services ({len(detailed_config['domains'])} configured):[/bold]")
-                for i, domain_info in enumerate(detailed_config['domains'], 1):
-                    console.print(f"\n  [bold]{i}. {domain_info['domain']}[/bold]")
-                    
-                    # Show public port
-                    if domain_info.get('public_port'):
-                        console.print(f"     Public port: {domain_info['public_port']}")
-                    
-                    # Show backend ports
-                    if domain_info['ports']:
-                        console.print(f"     Backend ports: {', '.join(domain_info['ports'])}")
-                    
-                    # Show paths
-                    if domain_info['paths']:
-                        console.print(f"     Paths: {', '.join(domain_info['paths'])}")
-                    
-                    # Show services
-                    if domain_info['services']:
-                        console.print(f"     Services:")
-                        for service in domain_info['services']:
-                            console.print(f"       - {service}")
-                    
-                    # Show raw config (indented)
-                    if domain_info['config_lines']:
-                        console.print(f"     Configuration:")
-                        for line in domain_info['config_lines'][:5]:  # Show first 5 lines
-                            console.print(f"       {line}")
-                        if len(domain_info['config_lines']) > 5:
-                            console.print(f"       ... ({len(domain_info['config_lines']) - 5} more lines)")
-            else:
-                console.print("\n  [dim]No domain-based services configured[/dim]")
-            
-            # Show public IP services
-            if detailed_config['public_services']:
-                console.print(f"\n  [bold]Public IP Services ({len(detailed_config['public_services'])} configured):[/bold]")
-                for i, service_info in enumerate(detailed_config['public_services'], 1):
-                    # Display full listen address
-                    if service_info.get('listen_address'):
-                        listen_display = f"{service_info['listen_address']}:{service_info['listen_port']}"
-                    else:
-                        listen_display = f":{service_info['listen_port']}"
-                    console.print(f"\n  [bold]{i}. Listening on {listen_display}[/bold]")
-                    
-                    # Show backend ports
-                    if service_info['ports']:
-                        console.print(f"     Backend ports: {', '.join(service_info['ports'])}")
-                    
-                    # Show paths
-                    if service_info['paths']:
-                        console.print(f"     Paths: {', '.join(service_info['paths'])}")
-                    
-                    # Show services
-                    if service_info['services']:
-                        console.print(f"     Services:")
-                        for service in service_info['services']:
-                            console.print(f"       - {service}")
-                    
-                    # Show raw config (indented)
-                    if service_info['config_lines']:
-                        console.print(f"     Configuration:")
-                        for line in service_info['config_lines'][:5]:  # Show first 5 lines
-                            console.print(f"       {line}")
-                        if len(service_info['config_lines']) > 5:
-                            console.print(f"       ... ({len(service_info['config_lines']) - 5} more lines)")
-            else:
-                console.print("\n  [dim]No public IP services configured[/dim]")
-            
-            # Show summary of all domains and ports
-            parsed = caddy_mgr.parse_domains_and_ports(config_content)
-            console.print(f"\n  [bold]Summary:[/bold]")
-            console.print(f"    Total domains: {len(parsed['domains'])}")
-            console.print(f"    Total public services: {len(detailed_config['public_services'])}")
-            console.print(f"    Total backend ports: {len(parsed['ports'])}")
-            if parsed['domains']:
-                console.print(f"    Domains: {', '.join(parsed['domains'])}")
-            if detailed_config['public_services']:
-                public_listeners = []
-                for s in detailed_config['public_services']:
-                    if s.get('listen_address'):
-                        public_listeners.append(f"{s['listen_address']}:{s['listen_port']}")
-                    else:
-                        public_listeners.append(f":{s['listen_port']}")
-                console.print(f"    Public listeners: {', '.join(public_listeners)}")
-            if parsed['ports']:
-                console.print(f"    Backend ports: {', '.join(parsed['ports'])}")
-        else:
-            console.print("  [yellow]Could not read Caddy configuration[/yellow]")
-            console.print("  [dim]Configuration file may not exist yet[/dim]")
-        
-        # Show available templates
-        console.print("\n[bold]3. Available Templates[/bold]")
-        available_templates = caddy_mgr.get_available_templates()
-        if available_templates:
-            for tmpl in available_templates:
-                console.print(f"  • {tmpl}")
-        else:
-            console.print("  [dim]No templates found[/dim]")
-        
-        console.print("\n[green]✓ Dry run completed successfully[/green]")
-        ssh.disconnect()
-        return
-
-    try:
-
-        # Check/Install Caddy
-        console.print("\n[bold]Step 3: Checking Caddy installation[/bold]")
-        if not caddy_mgr.is_caddy_installed():
-            console.print("[yellow]Caddy is not installed[/yellow]")
-            if interactive:
-                from rich.prompt import Confirm
-                install = Confirm.ask("Install Caddy now?", default=True)
-                if not install:
-                    console.print("[yellow]Caddy installation skipped[/yellow]")
-                    return
-            
-            if not caddy_mgr.install_caddy():
-                console.print("[red]✗ Failed to install Caddy[/red]")
-                sys.exit(1)
-        else:
-            version = caddy_mgr.get_caddy_version()
-            console.print(f"[green]✓ Caddy is installed (version: {version})[/green]")
-
-        # Analyze current configuration
-        console.print("\n[bold]Step 4: Analyzing current configuration[/bold]")
-        config_content = caddy_mgr.read_caddy_config()
-        if config_content:
-            parsed = caddy_mgr.parse_domains_and_ports(config_content)
-            
-            # Display current domains
-            if parsed["domains"]:
-                console.print("\n[bold]Current domains:[/bold]")
-                for domain in parsed["domains"]:
-                    console.print(f"  • {domain}")
-            else:
-                console.print("[dim]No domains configured yet[/dim]")
-            
-            # Display current ports
-            if parsed["ports"]:
-                console.print("\n[bold]Current ports:[/bold]")
-                for port_num in parsed["ports"]:
-                    console.print(f"  • {port_num}")
-            else:
-                console.print("[dim]No ports configured yet[/dim]")
-        else:
-            console.print("[yellow]Could not read Caddy configuration[/yellow]")
-
-        # Import remote configuration to local directory
-        console.print("\n[bold]Step 5: Importing remote configuration[/bold]")
-        import_result = caddy_mgr.import_remote_config(".", host, force)
-        
-        # Show import summary
-        if import_result['imported']:
-            console.print(f"[green]✓ Imported {len(import_result['imported'])} template(s) from remote[/green]")
-        elif import_result['errors']:
-            console.print(f"[yellow]⚠ Could not import from remote: {import_result['errors'][0]}[/yellow]")
-            console.print("[dim]Using local templates instead[/dim]")
-        
-        # If --use-config is specified, exit after importing
-        if use_config:
-            console.print("\n[bold green]✓ Import complete![/bold green]")
-            ssh.disconnect()
-            return
-        
-        # Get user input for new entry
-        console.print("\n[bold]Step 6: Configure new entry[/bold]")
-        
-        # Show available templates (now includes imported ones)
-        available_templates = caddy_mgr.get_available_templates()
-        if available_templates:
-            console.print(f"\n[bold]Available templates:[/bold] {', '.join(available_templates)}")
-        
-        if interactive:
-            from rich.prompt import Prompt
-            
-            # Prompt for domain
-            domain = Prompt.ask("Domain name")
-            if not domain:
-                console.print("[red]✗ Domain name is required[/red]")
-                sys.exit(1)
-            
-            # Prompt for port
-            port_input = Prompt.ask("Port number")
-            try:
-                port_num = int(port_input)
-                if not (1 <= port_num <= 65535):
-                    raise ValueError
-            except ValueError:
-                console.print("[red]✗ Invalid port number[/red]")
-                sys.exit(1)
-            
-            # Prompt for template if not specified
-            if template == "default" and available_templates:
-                template_input = Prompt.ask(
-                    "Template name",
-                    default=template,
-                    choices=available_templates
-                )
-                if template_input:
-                    template = template_input
-        else:
-            # Non-interactive mode - domain and port must be provided via prompts
-            console.print("[yellow]⚠ Non-interactive mode requires domain and port to be provided interactively[/yellow]")
-            from rich.prompt import Prompt
-            
-            domain = Prompt.ask("Domain name")
-            if not domain:
-                console.print("[red]✗ Domain name is required[/red]")
-                sys.exit(1)
-            
-            port_input = Prompt.ask("Port number")
-            try:
-                port_num = int(port_input)
-                if not (1 <= port_num <= 65535):
-                    raise ValueError
-            except ValueError:
-                console.print("[red]✗ Invalid port number[/red]")
-                sys.exit(1)
-
-        # Check if entry already exists
-        if caddy_mgr.entry_exists(domain):
-            console.print(f"[yellow]⚠ Entry for {domain} already exists in Caddyfile[/yellow]")
-            if interactive:
-                from rich.prompt import Confirm
-                overwrite = Confirm.ask("Overwrite existing entry?", default=False)
-                if not overwrite:
-                    console.print("[yellow]Operation cancelled[/yellow]")
-                    return
-
-        # Add entry
-        console.print("\n[bold]Step 7: Adding Caddy entry[/bold]")
-        if not caddy_mgr.add_entry(domain, port_num, template):
-            console.print("[red]✗ Failed to add entry[/red]")
-            sys.exit(1)
-
-        # Validate configuration
-        console.print("\n[bold]Step 8: Validating configuration[/bold]")
-        if not caddy_mgr.validate_config():
-            console.print("[red]✗ Configuration validation failed[/red]")
-            sys.exit(1)
-
-        # Reload Caddy
-        console.print("\n[bold]Step 9: Reloading Caddy[/bold]")
-        caddy_mgr.reload_caddy()
-
-        # Print summary
-        console.print("\n[bold green]✓ Caddy configuration complete![/bold green]")
-        console.print(f"\n[bold]Summary:[/bold]")
-        console.print(f"  Domain: {domain}")
-        console.print(f"  Port: {port_num}")
-        console.print(f"  Template: {template}")
-        console.print(f"  Config: {caddy_mgr.get_caddy_config_path()}")
-
-    finally:
-        ssh.disconnect()
-
 
 @click.command()
 @click.option("--image", "-i", required=True, help="Docker image to push (name:tag)")
@@ -878,21 +528,23 @@ def caddy(host: str, port: int, username: str, key: str, password: str,
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
 @click.option("--use-config/--no-use-config", default=False, help="Load arguments from config file")
 @click.option("--dry-run", is_flag=True, help="Validate connection without transferring image")
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+                            help="Whether to transfer the image to a remote SSH host or the local machine")
 def docker_push(image: str, host: str, port: int, username: str, key: str,
-                password: str, platform: str, registry_username: str,
+                password: str, platform: str | None, registry_username: str,
                 registry_password: str, interactive: bool, use_config: bool,
-                dry_run: bool):
-    """Push a Docker image to a remote server over SSH.
+                                dry_run: bool, target: str):
+    """Push a Docker image to the deployment target.
 
-    Pulls the image locally (targeting the remote server architecture), saves it
-    to a tarball, transfers it via SFTP, and loads it on the remote server.
+    Pulls the image locally for the target architecture, saves it to a tarball,
+    copies it to the target, and loads it there.
     """
     import tempfile
     import os
 
     console.print(Panel.fit(
         "[bold blue]Git SSH Deploy Tool - Docker Push[/bold blue]\n"
-        "Transfer a Docker image to a remote server over SSH",
+        "Transfer a Docker image to the deployment target",
         border_style="blue",
     ))
 
@@ -900,7 +552,7 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
     config = DeployConfig()
     if use_config:
         saved_args = config.load_args("docker-push")
-        fallback_sources = ["push", "pull", "caddy"]
+        fallback_sources = ["push", "pull"]
 
         # docker-push uses the same SSH transport as other commands. If its
         # own saved config is incomplete, prefer a complete existing SSH profile
@@ -908,7 +560,7 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
         if not saved_args.get("host") or not saved_args.get("username") or not saved_args.get("key"):
             if saved_args:
                 console.print(
-                    "[yellow]docker-push config is incomplete; trying SSH settings from push/pull/caddy.[/yellow]"
+                    "[yellow]docker-push config is incomplete; trying SSH settings from push/pull.[/yellow]"
                 )
             for source in fallback_sources:
                 candidate = config.load_args(source)
@@ -928,17 +580,21 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
                 username = saved_args["username"]
             if not key and "key" in saved_args:
                 key = saved_args["key"]
+            if target == "remote" and "target" in saved_args:
+                target = saved_args["target"]
+
+    target = resolve_target(target, host)
 
     # Connection details
-    console.print("\n[bold]Step 1: Configuring SSH connection[/bold]")
-    if interactive and not host:
+    console.print("\n[bold]Step 1: Configuring target[/bold]")
+    if target == "remote" and interactive and not host:
         conn_details = prompt_connection_details()
         host = conn_details["host"]
         port = conn_details["port"]
         username = conn_details["username"]
         key = conn_details["key_filename"]
         password = conn_details["password"]
-    else:
+    elif target == "remote":
         if not host:
             console.print("[red]✗ Host is required[/red]")
             sys.exit(1)
@@ -947,13 +603,12 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
             sys.exit(1)
 
     # Persist non-sensitive args
-    config.save_args({"host": host, "port": port, "username": username, "key": key}, "docker-push")
+    config.save_args({"host": host, "port": port, "username": username, "key": key, "target": target}, "docker-push")
     console.print(f"[dim]Arguments saved to {config.get_config_path()}[/dim]")
 
-    # SSH connect
-    console.print("\n[bold]Step 2: Connecting to remote server[/bold]")
-    ssh = SSHConnection(host=host, port=port, username=username,
-                        password=password, key_filename=key)
+    # Target connect
+    console.print("\n[bold]Step 2: Connecting to target[/bold]")
+    ssh = _build_connection(target, host, port, username, key, password)
     if not ssh.connect():
         sys.exit(1)
 
@@ -963,9 +618,9 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
         console.print("\n[bold]Dry Run Analysis[/bold]")
         if docker_mgr.is_docker_installed():
             version = docker_mgr.get_docker_version()
-            console.print(f"  [green]✓ Docker is installed on remote (version: {version})[/green]")
+            console.print(f"  [green]✓ Docker is installed on target (version: {version})[/green]")
         else:
-            console.print("  [yellow]⚠ Docker is not installed on remote[/yellow]")
+            console.print("  [yellow]⚠ Docker is not installed on target[/yellow]")
         detected = docker_mgr.detect_remote_arch()
         effective_platform = platform or detected
         console.print(f"  Platform: {effective_platform or 'unknown'}")
@@ -976,9 +631,9 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
 
     try:
         # Step 3: Ensure Docker is installed on remote
-        console.print("\n[bold]Step 3: Checking Docker on remote server[/bold]")
+        console.print("\n[bold]Step 3: Checking Docker on target[/bold]")
         if not docker_mgr.is_docker_installed():
-            console.print("[yellow]Docker is not installed on the remote server[/yellow]")
+            console.print("[yellow]Docker is not installed on the target[/yellow]")
             if interactive:
                 from rich.prompt import Confirm
                 if not Confirm.ask("Install Docker now?", default=True):
@@ -1025,13 +680,13 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
         # Step 8: Transfer tarball to remote
         step += 1
         remote_tar = f"/tmp/{tar_filename}"
-        console.print(f"\n[bold]Step {step}: Transferring tarball to remote[/bold]")
+        console.print(f"\n[bold]Step {step}: Copying tarball to target[/bold]")
         if not docker_mgr.transfer_tarball(local_tar, remote_tar):
             sys.exit(1)
 
         # Step 9: Load on remote
         step += 1
-        console.print(f"\n[bold]Step {step}: Loading image on remote server[/bold]")
+        console.print(f"\n[bold]Step {step}: Loading image on target[/bold]")
         if not docker_mgr.load_image(remote_tar, image):
             sys.exit(1)
 
@@ -1046,7 +701,7 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
         except OSError:
             pass
 
-        console.print(f"\n[bold green]✓ Docker image '{image}' transferred successfully to {host}[/bold green]")
+        console.print(f"\n[bold green]✓ Docker image '{image}' transferred successfully to {display_target(ssh)}[/bold green]")
 
     finally:
         ssh.disconnect()
@@ -1056,30 +711,9 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
 # proxy subcommand group
 # ---------------------------------------------------------------------------
 
-def _build_ssh_from_config(config: DeployConfig, section: str,
-                           host: str, port: int, username: str,
-                           key: str, password: str) -> SSHConnection:
-    """Return an SSHConnection, loading missing fields from saved config."""
-    if not host or not username or not key:
-        saved = config.load_args(section)
-        fallback_sources = ["push", "pull", "caddy", "docker-push"]
-        if not saved.get("host") or not saved.get("username") or not saved.get("key"):
-            for src in fallback_sources:
-                candidate = config.load_args(src)
-                if candidate.get("host") and candidate.get("username") and candidate.get("key"):
-                    saved = candidate
-                    break
-        host = host or saved.get("host", "")
-        port = port if port != 22 else saved.get("port", 22)
-        username = username or saved.get("username", "")
-        key = key or saved.get("key", "")
-    return SSHConnection(host=host, port=port, username=username,
-                         password=password, key_filename=key)
-
-
 @click.group()
 def proxy():
-    """Manage the caddy-docker-proxy ingress container on the remote server."""
+    """Manage the caddy-docker-proxy ingress container on the deployment target."""
     pass
 
 
@@ -1095,18 +729,21 @@ def proxy():
               help="If native Caddy exists, migrate its Caddyfile and stop it before proxy start")
 @click.option("--ingress-network", "ingress_networks", multiple=True,
               help="Ingress networks for proxy/service discovery (repeat flag or use comma-separated values)")
-def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy, ingress_networks):
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to manage the proxy on a remote SSH host or the local machine")
+def proxy_up(host, port, username, key, password, use_config, migrate_native_caddy, ingress_networks, target):
     """Start (or ensure running) the caddy-docker-proxy ingress stack."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
+    ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
     networks = normalize_ingress_networks(ingress_networks)
-    if not ssh.host or not ssh.username:
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
     console.print(Panel.fit(
         "[bold blue]Proxy — up[/bold blue]\n"
         f"Ingress: {PROXY_IMAGE}\n"
+        f"Target: {display_target(ssh)}\n"
         f"Networks: {', '.join(networks)}",
         border_style="blue",
     ))
@@ -1126,7 +763,7 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
         console.print("\n[bold]Step 0: Check native Caddy[/bold]")
         native_caddy_found = mgr.native_caddy_exists()
         if native_caddy_found:
-            console.print("[yellow]⚠ Native Caddy detected on remote host[/yellow]")
+            console.print("[yellow]⚠ Native Caddy detected on target host[/yellow]")
             if migrate_native_caddy:
                 should_migrate_native_caddy = Confirm.ask(
                     "Migrate native Caddy config and hand over ports 80/443 to docker-caddy-proxy?",
@@ -1145,21 +782,19 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
         # Step 2: check image availability
         console.print("\n[bold]Step 2: Check proxy image[/bold]")
         if not mgr.proxy_image_exists_remote():
-            console.print(f"[yellow]Image {PROXY_IMAGE} not found on remote.[/yellow]")
+            console.print(f"[yellow]Image {PROXY_IMAGE} not found on target.[/yellow]")
             if Confirm.ask(
-                f"Push {PROXY_IMAGE} to remote now using docker-push?",
+                f"Push {PROXY_IMAGE} to target now using docker-push?",
                 default=True,
             ):
                 from click.testing import CliRunner
                 runner = CliRunner()
-                result = runner.invoke(docker_push, [
-                    "--image", PROXY_IMAGE,
-                    "--host", ssh.host,
-                    "--port", str(ssh.port),
-                    "--username", ssh.username,
-                    "--no-interactive",
-                    *(["--key", ssh.key_filename] if ssh.key_filename else []),
-                ], catch_exceptions=False, standalone_mode=False)
+                result = runner.invoke(
+                    docker_push,
+                    docker_push_args_for_connection(PROXY_IMAGE, ssh),
+                    catch_exceptions=False,
+                    standalone_mode=False,
+                )
                 if result.exit_code != 0:
                     console.print("[red]✗ docker-push failed[/red]")
                     sys.exit(1)
@@ -1236,9 +871,13 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
             sys.exit(1)
 
         status = mgr.get_status()
+        console.print("\n[bold]Step 7: Reconcile globally exposed services[/bold]")
+        if not ServiceManager(ssh).reconcile_global_services(networks):
+            sys.exit(1)
         console.print(f"\n[bold green]✓ Ingress proxy is {status}[/bold green]")
         config.save_args({"host": ssh.host, "port": ssh.port,
-                          "username": ssh.username, "key": ssh.key_filename}, "proxy")
+                          "username": ssh.username, "key": ssh.key_filename,
+                          "target": target}, "proxy")
     finally:
         ssh.disconnect()
 
@@ -1251,11 +890,13 @@ def proxy_up(host, port, username, key, password, use_config, migrate_native_cad
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-def proxy_status(host, port, username, key, password, use_config):
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to inspect a remote SSH host or the local machine")
+def proxy_status(host, port, username, key, password, use_config, target):
     """Show the status of the caddy-docker-proxy container."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
@@ -1268,6 +909,7 @@ def proxy_status(host, port, username, key, password, use_config):
         if status:
             colour = "green" if running else "yellow"
             console.print(f"[{colour}]Ingress proxy: {status}[/{colour}]")
+            console.print(f"[dim]Health check: {proxy_healthcheck_url(ssh)}[/dim]")
         else:
             console.print("[yellow]Ingress proxy container not found[/yellow]")
             console.print("[dim]Run: deploy proxy up[/dim]")
@@ -1283,11 +925,13 @@ def proxy_status(host, port, username, key, password, use_config):
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-def proxy_down(host, port, username, key, password, use_config):
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to manage a remote SSH host or the local machine")
+def proxy_down(host, port, username, key, password, use_config, target):
     """Stop the caddy-docker-proxy ingress stack."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
@@ -1309,11 +953,13 @@ def proxy_down(host, port, username, key, password, use_config):
               help="Load SSH args from saved config")
 @click.option("--lines", default=80, show_default=True,
               help="How many proxy log lines to fetch")
-def proxy_logs(host, port, username, key, password, use_config, lines):
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to inspect a remote SSH host or the local machine")
+def proxy_logs(host, port, username, key, password, use_config, lines, target):
     """Show recent docker-caddy-proxy container logs."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
@@ -1339,11 +985,13 @@ def proxy_logs(host, port, username, key, password, use_config, lines):
               help="Load SSH args from saved config")
 @click.option("--lines", default=80, show_default=True,
               help="How many log/journal lines to fetch")
-def proxy_diagnose(host, port, username, key, password, use_config, lines):
-    """Collect proxy and native Caddy diagnostics from the remote server."""
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to diagnose a remote SSH host or the local machine")
+def proxy_diagnose(host, port, username, key, password, use_config, lines, target):
+    """Collect proxy and native Caddy diagnostics from the deployment target."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "proxy", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "proxy", target, host, port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
@@ -1355,12 +1003,13 @@ def proxy_diagnose(host, port, username, key, password, use_config, lines):
 
         console.print(Panel.fit(
             "[bold blue]Proxy Diagnose[/bold blue]\n"
-            "Remote Caddy migration diagnostics",
+            "Target Caddy migration diagnostics",
             border_style="blue",
         ))
 
         sections = [
             ("Proxy Status", mgr.get_status() or "not found"),
+            ("Health Endpoint", proxy_healthcheck_url(ssh)),
             ("Proxy Logs", mgr.get_proxy_logs(lines=lines).strip() or "<empty>"),
             (
                 "Generated Caddyfile",
@@ -1408,11 +1057,13 @@ def service():
 @click.option("--port", type=int, help="App port inside container (auto-detected for FastAPI)")
 @click.option("--image", "-i",
               help="Use a pre-built image instead of a build directive")
-@click.option("--ingress-network", default=INGRESS_NETWORK,
-              help="External Docker network used for ingress routing")
+@click.option("--ingress-network", "ingress_networks", multiple=True,
+              help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
+@click.option("--global-ingress/--no-global-ingress", default=False,
+              help="Attach the service to every configured ingress network instead of just one")
 @click.option("--force", is_flag=True,
               help="Overwrite existing Dockerfile / docker-compose.yml")
-def service_init(domain, name, port, image, ingress_network, force):
+def service_init(domain, name, port, image, ingress_networks, global_ingress, force):
     """Scaffold Dockerfile and docker-compose.yml for a FastAPI service.
 
     Run inside the project directory.  Detects FastAPI entrypoint automatically.
@@ -1451,10 +1102,24 @@ def service_init(domain, name, port, image, ingress_network, force):
             domain=domain,
             port=effective_port,
             image=image,
-            ingress_network=ingress_network,
+            ingress_networks=ingress_networks,
+            exposure_scope="global" if global_ingress else "single",
         )
         compose_path.write_text(compose_content)
         console.print(f"[green]✓ Wrote {compose_path}[/green]")
+
+        metadata_path = project_dir / ".deploy-service.json"
+        metadata_path.write_text(
+            render_service_metadata(
+                service_name=service_name,
+                domain=domain,
+                port=effective_port,
+                image=image,
+                ingress_networks=ingress_networks,
+                exposure_scope="global" if global_ingress else "single",
+            )
+        )
+        console.print(f"[green]✓ Wrote {metadata_path}[/green]")
 
     console.print("\n[bold green]✓ Service initialised[/bold green]")
     console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
@@ -1468,8 +1133,10 @@ def service_init(domain, name, port, image, ingress_network, force):
               help="Public domain / hostname")
 @click.option("--port", type=int, default=8000,
               help="App port inside the container")
-@click.option("--ingress-network", default=INGRESS_NETWORK,
-              help="External Docker network used for ingress routing")
+@click.option("--ingress-network", "ingress_networks", multiple=True,
+              help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
+@click.option("--global-ingress/--no-global-ingress", default=False,
+              help="Attach the service to every configured ingress network instead of just one")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -1477,25 +1144,30 @@ def service_init(domain, name, port, image, ingress_network, force):
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, username, key,
-                   password, use_config):
-    """Deploy a service image to the remote server and register with ingress.
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to deploy to a remote SSH host or the local machine")
+def service_deploy(name, image, domain, port, ingress_networks, global_ingress, host, ssh_port, username, key,
+                   password, use_config, target):
+    """Deploy a service image to the deployment target and register with ingress.
 
-    The image must already exist on the remote (use 'deploy docker-push' first),
+    The image must already exist on the target (use 'deploy docker-push' first),
     or the command will prompt you to push it.
     """
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "service", host, ssh_port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "service", target, host, ssh_port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
     service_name = name or Path(".").resolve().name
 
+    requested_networks = normalize_ingress_networks(ingress_networks)
+
     console.print(Panel.fit(
         f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
         f"Image: {image}  Domain: {domain}  Port: {port}\n"
-        f"Ingress network: {ingress_network}",
+        f"Target: {display_target(ssh)}\n"
+        f"Ingress: {'all configured networks' if global_ingress else ', '.join(requested_networks)}",
         border_style="blue",
     ))
 
@@ -1514,28 +1186,26 @@ def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, u
             sys.exit(1)
 
         # Step 2: check image availability on remote
-        console.print("\n[bold]Step 2: Check image on remote[/bold]")
+        console.print("\n[bold]Step 2: Check image on target[/bold]")
         if not svc_mgr.image_exists_remote(image):
-            console.print(f"[yellow]Image '{image}' not found on remote.[/yellow]")
+            console.print(f"[yellow]Image '{image}' not found on target.[/yellow]")
             from rich.prompt import Confirm
             if Confirm.ask(
-                f"Push '{image}' to remote now using docker-push?",
+                f"Push '{image}' to target now using docker-push?",
                 default=True,
             ):
                 from click.testing import CliRunner
                 runner = CliRunner()
-                result = runner.invoke(docker_push, [
-                    "--image", image,
-                    "--host", ssh.host,
-                    "--port", str(ssh.port),
-                    "--username", ssh.username,
-                    "--no-interactive",
-                    *(["--key", ssh.key_filename] if ssh.key_filename else []),
-                ], catch_exceptions=False, standalone_mode=False)
+                result = runner.invoke(
+                    docker_push,
+                    docker_push_args_for_connection(image, ssh),
+                    catch_exceptions=False,
+                    standalone_mode=False,
+                )
                 if result.exit_code != 0:
                     console.print("[red]✗ docker-push failed[/red]")
                     sys.exit(1)
-                # Reconnect: docker-push opens its own SSH session
+                # Reconnect: docker-push opens its own target session
                 ssh.disconnect()
                 if not ssh.connect():
                     sys.exit(1)
@@ -1543,11 +1213,15 @@ def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, u
                 proxy_mgr = ProxyManager(ssh)
             else:
                 console.print(
-                    f"[yellow]Run: deploy docker-push -i {image} --host {ssh.host} first[/yellow]"
+                    f"[yellow]Run: deploy docker-push {' '.join(docker_push_args_for_connection(image, ssh))} first[/yellow]"
                 )
                 sys.exit(1)
         else:
-            console.print(f"[green]✓ Image '{image}' found on remote[/green]")
+            console.print(f"[green]✓ Image '{image}' found on target[/green]")
+
+        effective_networks = (
+            proxy_mgr.get_configured_ingress_networks() if global_ingress else requested_networks
+        )
 
         # Step 3: ensure service directory and compose file
         console.print("\n[bold]Step 3: Upload service compose[/bold]")
@@ -1558,9 +1232,20 @@ def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, u
             domain=domain,
             port=port,
             image=image,
-            ingress_network=ingress_network,
+            ingress_networks=effective_networks,
+            exposure_scope="global" if global_ingress else "single",
         )
         if not svc_mgr.upload_compose(service_name, compose_content):
+            sys.exit(1)
+        metadata_content = render_service_metadata(
+            service_name=service_name,
+            domain=domain,
+            port=port,
+            image=image,
+            ingress_networks=effective_networks,
+            exposure_scope="global" if global_ingress else "single",
+        )
+        if not svc_mgr.upload_metadata(service_name, metadata_content):
             sys.exit(1)
 
         # Step 4: start service
@@ -1574,10 +1259,12 @@ def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, u
         console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
         console.print(f"  Domain : {domain}")
         console.print(f"  Status : {status}")
+        console.print(f"  Exposure: {'global' if global_ingress else 'single-network'}")
         if container_ip:
             console.print(f"  Container IP: {container_ip}")
         config.save_args({"host": ssh.host, "port": ssh.port,
-                          "username": ssh.username, "key": ssh.key_filename}, "service")
+                          "username": ssh.username, "key": ssh.key_filename,
+                          "target": target}, "service")
     finally:
         ssh.disconnect()
 
@@ -1591,11 +1278,13 @@ def service_deploy(name, image, domain, port, ingress_network, host, ssh_port, u
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-def service_status(name, host, port, username, key, password, use_config):
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+              help="Whether to inspect a remote SSH host or the local machine")
+def service_status(name, host, port, username, key, password, use_config, target):
     """Show the running status of a deployed service."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "service", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(config, "service", target, host, port, username, key, password, use_config)
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
@@ -1609,7 +1298,7 @@ def service_status(name, host, port, username, key, password, use_config):
             colour = "green" if status == "running" else "yellow"
             console.print(f"[{colour}]Service '{service_name}': {status}[/{colour}]")
         else:
-            console.print(f"[yellow]Service '{service_name}' not found on remote[/yellow]")
+            console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
     finally:
         ssh.disconnect()
 
@@ -1634,12 +1323,25 @@ def service_status(name, host, port, username, key, password, use_config):
               help="Per-command SSH timeout in seconds")
 @click.option("--action-timeout", default=15.0, show_default=True,
               help="Overall monitor action timeout in seconds")
+@click.option("--target", type=TARGET_CHOICES, default="remote", show_default=True,
+                            help="Whether to monitor a remote SSH host or the local machine")
 def monitor(host, port, username, key, password, use_config, refresh_interval, log_lines,
-            command_timeout, action_timeout):
+                        command_timeout, action_timeout, target):
     """Run a long-running TUI monitor for proxy/services/networks/resources."""
     config = DeployConfig()
-    ssh = _build_ssh_from_config(config, "monitor", host, port, username, key, password)
-    if not ssh.host or not ssh.username:
+    ssh = _build_connection_from_config(
+        config,
+        "monitor",
+        target,
+        host,
+        port,
+        username,
+        key,
+        password,
+        use_config,
+        command_timeout,
+    )
+    if needs_remote_identity(ssh):
         console.print("[red]✗ Host and username are required[/red]")
         console.print("[dim]Use --host/--username or save config via push/pull/proxy/service first[/dim]")
         sys.exit(1)
@@ -1649,6 +1351,7 @@ def monitor(host, port, username, key, password, use_config, refresh_interval, l
         "port": ssh.port,
         "username": ssh.username,
         "key": ssh.key_filename,
+        "target": target,
     }, "monitor")
 
     try:
@@ -1661,9 +1364,10 @@ def monitor(host, port, username, key, password, use_config, refresh_interval, l
 
     console.print(Panel.fit(
         "[bold blue]Deploy Monitor[/bold blue]\n"
-        f"Target: {ssh.username}@{ssh.host}:{ssh.port}",
+        f"Target: {display_target(ssh)}",
         border_style="blue",
     ))
+    connection_factory = LocalConnection if is_local_connection(ssh) else SSHConnection
     app = MonitorApp(
         host=ssh.host,
         port=ssh.port,
@@ -1674,6 +1378,7 @@ def monitor(host, port, username, key, password, use_config, refresh_interval, l
         log_lines=log_lines,
         command_timeout=command_timeout,
         action_timeout=action_timeout,
+        ssh_factory=connection_factory,
     )
     app.run()
 
@@ -1693,7 +1398,6 @@ cli.add_command(main, name="push")
 cli.add_command(pull, name="pull")
 cli.add_command(show_config, name="show-config")
 cli.add_command(clear_config, name="clear-config")
-cli.add_command(caddy, name="caddy")
 cli.add_command(docker_push, name="docker-push")
 cli.add_command(proxy, name="proxy")
 cli.add_command(service, name="service")

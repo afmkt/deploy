@@ -7,6 +7,7 @@ import pytest
 from deploy.service import (
     detect_fastapi_entrypoint,
     render_dockerfile,
+    render_service_metadata,
     render_service_compose,
     ServiceManager,
 )
@@ -113,6 +114,7 @@ def test_render_service_compose_external_network():
     compose = render_service_compose("mysvc", "api.example.com", 8000)
     assert "external: true" in compose
     assert f"name: {INGRESS_NETWORK}" in compose
+    assert "      - ingress" in compose
 
 
 def test_render_service_compose_custom_ingress_network():
@@ -120,10 +122,38 @@ def test_render_service_compose_custom_ingress_network():
         "mysvc",
         "api.example.com",
         8000,
-        ingress_network="app-alpha-net",
+        ingress_networks=["app-alpha-net"],
     )
     assert "name: app-alpha-net" in compose
-    assert "- ingress_net" in compose
+    assert "      - app-alpha-net" in compose
+
+
+def test_render_service_compose_multiple_ingress_networks_global_scope():
+    compose = render_service_compose(
+        "mysvc",
+        "api.example.com",
+        8000,
+        image="myimage:latest",
+        ingress_networks=["ingress", "app-a"],
+        exposure_scope="global",
+    )
+    assert "      - ingress" in compose
+    assert "      - app-a" in compose
+    assert "deploy.scope: global" in compose
+
+
+def test_render_service_metadata_contains_scope_and_networks():
+    metadata = render_service_metadata(
+        "mysvc",
+        "api.example.com",
+        8000,
+        image="myimage:latest",
+        ingress_networks=["ingress", "app-a"],
+        exposure_scope="global",
+    )
+    assert '"exposure_scope": "global"' in metadata
+    assert '"ingress_networks": [' in metadata
+    assert '"app-a"' in metadata
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +196,7 @@ def test_upload_compose_success():
     ssh = DummySSH(responses=[(0, "", "")])
     result = ServiceManager(ssh).upload_compose("mysvc", "version: '3.8'\n")
     assert result is True
-    assert "/opt/services/mysvc/docker-compose.yml" in ssh.executed[0]
+    assert "/tmp/deploy/services/mysvc/docker-compose.yml" in ssh.executed[0]
 
 
 def test_upload_compose_failure():
@@ -258,6 +288,32 @@ def test_list_services_success():
     ssh = DummySSH(responses=[(0, "api\nworker\n", "")])
     names = ServiceManager(ssh).list_services()
     assert names == ["api", "worker"]
+
+
+def test_reconcile_global_services_updates_compose_and_restarts():
+    metadata = render_service_metadata(
+        "api",
+        "api.example.com",
+        8000,
+        image="repo/api:latest",
+        ingress_networks=["ingress"],
+        exposure_scope="global",
+    )
+    ssh = DummySSH(
+        responses=[
+            (0, "api\nworker\n", ""),
+            (0, metadata, ""),
+            (0, "", ""),
+            (0, "", ""),
+            (0, "", ""),
+            (0, '{"service_name":"worker","domain":"worker.example.com","port":9000,"image":"repo/worker:latest","ingress_networks":["ingress"],"exposure_scope":"single"}', ""),
+        ]
+    )
+    mgr = ServiceManager(ssh)
+    assert mgr.reconcile_global_services(["ingress", "app-a"]) is True
+    assert any("deploy.scope: global" in cmd for cmd in ssh.executed)
+    assert any("app-a" in cmd and "docker-compose.yml" in cmd for cmd in ssh.executed)
+    assert any("docker compose" in cmd and "up -d" in cmd for cmd in ssh.executed)
 
 
 def test_list_services_failure():

@@ -1,12 +1,14 @@
 """Docker image transfer module."""
 
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
 
+from .local import LocalConnection
 from .ssh import SSHConnection
 
 console = Console()
@@ -22,6 +24,10 @@ class DockerManager:
 
     def __init__(self, ssh: SSHConnection):
         self.ssh = ssh
+
+    @property
+    def is_local(self) -> bool:
+        return bool(getattr(self.ssh, "is_local", False))
 
     @staticmethod
     def _q(value: str) -> str:
@@ -265,6 +271,17 @@ class DockerManager:
 
     def transfer_tarball(self, local_path: str, remote_path: str) -> bool:
         """Upload a local tarball to the remote server via SFTP."""
+        if self.is_local:
+            try:
+                size_mb = Path(local_path).stat().st_size / (1024 * 1024)
+                console.print(f"[blue]Copying {size_mb:.1f} MB locally → {remote_path}...[/blue]")
+                LocalConnection.copy_file(local_path, remote_path)
+                console.print("[green]✓ Local copy complete[/green]")
+                return True
+            except Exception as e:
+                console.print(f"[red]✗ Local copy failed: {e}[/red]")
+                return False
+
         try:
             size_mb = Path(local_path).stat().st_size / (1024 * 1024)
             console.print(f"[blue]Transferring {size_mb:.1f} MB → {remote_path}...[/blue]")
@@ -317,5 +334,11 @@ class DockerManager:
 
     def cleanup_remote(self, remote_tar_path: str) -> None:
         """Remove the tarball from the remote server."""
+        if self.is_local:
+            try:
+                Path(remote_tar_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+            return
         self.ssh.execute(f"rm -f {self._q(remote_tar_path)}")
         console.print(f"[dim]Cleaned up remote tarball: {remote_tar_path}[/dim]")

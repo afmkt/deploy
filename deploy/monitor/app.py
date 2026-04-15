@@ -12,6 +12,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, RichLog, Static, TabbedContent, TabPane
 
+from deploy.ssh import SSHConnection
+
 from .actions import ActionRunner
 from .collector import MonitorCollector
 from .models import ActionResult, Snapshot
@@ -129,12 +131,14 @@ class MonitorApp(App):
         log_lines: int = 120,
         command_timeout: float = 10.0,
         action_timeout: float = 15.0,
+        ssh_factory=None,
     ):
         super().__init__()
         self.refresh_interval = max(2, refresh_interval)
         self.log_lines = max(20, log_lines)
         self.command_timeout = max(1.0, float(command_timeout))
         self.action_timeout = max(self.command_timeout + 1.0, float(action_timeout))
+        ssh_factory = ssh_factory or SSHConnection
         self.collector = MonitorCollector(
             host=host,
             port=port,
@@ -142,6 +146,7 @@ class MonitorApp(App):
             key_filename=key_filename,
             password=password,
             command_timeout=self.command_timeout,
+            ssh_factory=ssh_factory,
         )
         self.runner = ActionRunner(
             host=host,
@@ -150,6 +155,7 @@ class MonitorApp(App):
             key_filename=key_filename,
             password=password,
             command_timeout=self.command_timeout,
+            ssh_factory=ssh_factory,
         )
         self.snapshot = Snapshot()
         self.selected_service = ""

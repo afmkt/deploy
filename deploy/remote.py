@@ -11,7 +11,7 @@ console = Console()
 class RemoteServer:
     """Manages remote server operations for deployment."""
 
-    def __init__(self, ssh: SSHConnection, deploy_path: str = "/var/repos"):
+    def __init__(self, ssh: SSHConnection, deploy_path: str = "/tmp/deploy/repos"):
         """Initialize remote server handler.
 
         Args:
@@ -20,6 +20,11 @@ class RemoteServer:
         """
         self.ssh = ssh
         self.deploy_path = deploy_path
+
+    @property
+    def is_local(self) -> bool:
+        """Return True when operations target the current machine."""
+        return bool(getattr(self.ssh, "is_local", False))
 
     @staticmethod
     def _q(value: str) -> str:
@@ -304,7 +309,10 @@ class RemoteServer:
         # because bare repository is empty and has no branches yet
 
         # Generate SSH URL for the bare repository
-        username = self.ssh.username or "root"
-        bare_repo_url = f"ssh://{username}@{self.ssh.host}:{self.ssh.port}{bare_repo_path}"
+        if self.is_local:
+            bare_repo_url = bare_repo_path
+        else:
+            username = self.ssh.username or "root"
+            bare_repo_url = f"ssh://{username}@{self.ssh.host}:{self.ssh.port}{bare_repo_path}"
 
         return True, bare_repo_url

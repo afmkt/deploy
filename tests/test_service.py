@@ -92,6 +92,11 @@ def test_render_service_compose_caddy_label():
     assert "caddy: api.example.com" in compose
 
 
+def test_render_service_compose_localhost_uses_http_label():
+    compose = render_service_compose("mysvc", "localhost", 8000, image="myimage:latest")
+    assert "caddy: http://localhost" in compose
+
+
 def test_render_service_compose_reverse_proxy_label():
     compose = render_service_compose("mysvc", "api.example.com", 8000, image="myimage:latest")
     assert "caddy.reverse_proxy" in compose
@@ -264,6 +269,21 @@ def test_get_deployed_image_found():
 def test_get_deployed_image_not_found():
     ssh = DummySSH(responses=[(1, "", "No such object")])
     assert ServiceManager(ssh).get_deployed_image("mysvc") is None
+
+
+def test_get_routed_host_strips_scheme_from_label():
+    ssh = DummySSH(responses=[(0, "http://localhost\n", "")])
+    assert ServiceManager(ssh).get_routed_host("mysvc") == "localhost"
+
+
+def test_get_routed_host_returns_plain_host_as_is():
+    ssh = DummySSH(responses=[(0, "api.example.com\n", "")])
+    assert ServiceManager(ssh).get_routed_host("mysvc") == "api.example.com"
+
+
+def test_get_routed_site_label_returns_raw_label():
+    ssh = DummySSH(responses=[(0, "http://localhost\n", "")])
+    assert ServiceManager(ssh).get_routed_site_label("mysvc") == "http://localhost"
 
 
 def test_get_container_ip_found():

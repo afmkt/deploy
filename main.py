@@ -1527,6 +1527,11 @@ def service_status(name, host, port, username, key, password, use_config, target
                     if active_route_host:
                         console.print(f"[dim]Route host: {active_route_host}[/dim]")
 
+                active_route_label = None
+                routed_label_getter = getattr(mgr, "get_routed_site_label", None)
+                if callable(routed_label_getter):
+                    active_route_label = routed_label_getter(service_name)
+
                 configured_domain = None
                 metadata = None
                 metadata_getter = getattr(mgr, "read_service_metadata", None)
@@ -1541,11 +1546,23 @@ def service_status(name, host, port, username, key, password, use_config, target
                 if active_route_host:
                     if active_route_host == "localhost":
                         console.print("[dim]Ingress access: curl http://localhost/<path>[/dim]")
+                        if active_route_label and active_route_label.startswith("http://"):
+                            console.print(
+                                "[dim]Ingress protocol: HTTP only (no localhost TLS certificate required)[/dim]"
+                            )
+                        else:
+                            console.print(
+                                "[dim]Ingress protocol: HTTPS redirect enabled for localhost[/dim]"
+                            )
                     else:
                         console.print(
                             "[dim]Ingress access: curl -H \"Host: "
                             f"{active_route_host}\" http://localhost/<path>[/dim]"
                         )
+                        if active_route_label and active_route_label.startswith("http://"):
+                            console.print("[dim]Ingress protocol: HTTP only[/dim]")
+                        else:
+                            console.print("[dim]Ingress protocol: HTTPS managed by Caddy[/dim]")
 
                 if isinstance(metadata, dict):
                     port_value = metadata.get("port")

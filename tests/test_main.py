@@ -1106,3 +1106,51 @@ def test_service_status_warns_on_route_host_metadata_mismatch(monkeypatch):
     assert 'Ingress access: curl -H "Host: x.com" http://localhost/<path>' in result.output
     assert "In-network access: http://auth:8000/<path>" in result.output
     assert "Routed host does not match persisted service domain metadata" in result.output
+
+
+def test_service_status_localhost_http_only_message(monkeypatch):
+    """service status makes localhost HTTP-only routing explicit."""
+    runner = CliRunner()
+
+    class FakeConnection:
+        is_local = True
+        host = "local"
+        port = 0
+        username = "tester"
+        key_filename = None
+
+        def connect(self):
+            return True
+
+        def disconnect(self):
+            pass
+
+    class FakeServiceManager:
+        def __init__(self, ssh):
+            self.ssh = ssh
+
+        def get_status(self, service_name):
+            return "running"
+
+        def get_routed_host(self, service_name):
+            return "localhost"
+
+        def get_routed_site_label(self, service_name):
+            return "http://localhost"
+
+        def read_service_metadata(self, service_name):
+            return {"domain": "localhost", "port": 8000}
+
+        def get_logs(self, service_name, lines=20):
+            return ""
+
+    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
+
+    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+
+    assert result.exit_code == 0, result.output
+    assert "Route host: localhost" in result.output
+    assert "Ingress access: curl http://localhost/<path>" in result.output
+    assert "Ingress protocol: HTTP only (no localhost TLS certificate required)" in result.output

@@ -5,6 +5,7 @@ import shlex
 import textwrap
 from pathlib import Path
 from typing import Optional, Sequence
+from urllib.parse import urlsplit
 
 from rich.console import Console
 
@@ -22,6 +23,39 @@ _FASTAPI_ENTRYPOINT_CANDIDATES = [
     ("api/main.py", "api.main:app", 8000),
 ]
 _FASTAPI_IMPORTS = ["from fastapi", "import fastapi", "FastAPI("]
+_LOCAL_HTTP_ONLY_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _primary_site_token(value: str) -> str:
+    """Return the first site token from potentially comma-separated input."""
+    return value.split(",", 1)[0].strip()
+
+
+def extract_site_host(value: str) -> Optional[str]:
+    """Extract a normalized host from a Caddy site label or address token."""
+    token = _primary_site_token(value)
+    if not token:
+        return None
+    parsed = urlsplit(token if "://" in token else f"//{token}")
+    if not parsed.hostname:
+        return None
+    return parsed.hostname.lower()
+
+
+def caddy_site_label(domain: str) -> str:
+    """Return the service caddy label value for a requested domain.
+
+    Localhost-style hosts are rendered as explicit HTTP addresses so Caddy
+    does not auto-upgrade them to HTTPS with an untrusted local certificate.
+    """
+    token = _primary_site_token(domain)
+    if "://" in token:
+        return token
+
+    host = extract_site_host(token)
+    if host in _LOCAL_HTTP_ONLY_HOSTS:
+        return f"http://{token}"
+    return token
 
 
 def detect_fastapi_entrypoint(project_dir: Path) -> tuple[str, str, int]:
@@ -75,6 +109,7 @@ def render_service_compose(
     instead of a build directive.
     """
     source_line = f"    image: {image}" if image else "    build: ."
+    site_label = caddy_site_label(domain)
     resolved_networks = normalize_ingress_networks(
         ingress_networks or ([ingress_network] if ingress_network else None)
     )
@@ -93,7 +128,7 @@ def render_service_compose(
     lines.extend(f"      - {network}" for network in resolved_networks)
     lines.extend([
         "    labels:",
-        f"      caddy: {domain}",
+        f"      caddy: {site_label}",
         f'      caddy.reverse_proxy: "{{{{upstreams {port}}}}}"',
         f"      deploy.scope: {exposure_scope}",
         "    restart: unless-stopped",
@@ -342,6 +377,14 @@ class ServiceManager:
 
     def get_routed_host(self, service_name: str) -> Optional[str]:
         """Return the current caddy host label configured on the service container."""
+        site_label = self.get_routed_site_label(service_name)
+        if site_label:
+            host = extract_site_host(site_label)
+            return host or site_label
+        return None
+
+    def get_routed_site_label(self, service_name: str) -> Optional[str]:
+        """Return the raw caddy site label configured on the service container."""
         exit_code, stdout, _ = self.ssh.execute(
             f"docker inspect --format '{{{{ index .Config.Labels \"caddy\" }}}}' "
             f"{self._q(service_name)} 2>/dev/null"

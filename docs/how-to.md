@@ -2,6 +2,8 @@
 
 Practical step-by-step guides for common deployment workflows.
 
+For option-by-option argument resolution and command behavior, see `docs/cli-reference.md`.
+
 ---
 
 ## Table of Contents

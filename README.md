@@ -55,6 +55,11 @@ python main.py --help
 uv run python main.py --help
 ```
 
+## Documentation Map
+
+- CLI argument and command reference (resolution-first): `docs/cli-reference.md`
+- Workflow playbooks and end-to-end scenarios: `docs/how-to.md`
+
 ## Top-Level Commands
 
 ```text

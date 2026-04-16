@@ -21,6 +21,7 @@ This repository already has a few important shared seams:
 
 Prioritize findings that reduce behavior drift across commands and simplify the conceptual model.
 
+- Treat argument resolution and command workflow as orthogonal concerns. Resolution should produce normalized intent; workflow should execute from resolved intent without re-resolving.
 - Prefer one shared helper over repeated per-command conditionals.
 - Prefer manager-level or helper-level refactors over CLI-only fixes.
 - Prefer a single source of truth for defaults, target inference, path layout, and config fallback behavior.
@@ -34,10 +35,11 @@ Inspect the code for these patterns:
 1. Repeated local-versus-remote branching that should live in one helper or connection abstraction.
 2. The same default path, network rule, or config fallback logic repeated across commands.
 3. Similar validation or normalization logic implemented in both CLI handlers and manager modules.
-4. Features implemented in one command group but not structurally available to related command groups.
-5. CLI code in `main.py` that is doing business logic which should live in a module under `deploy/`.
-6. Tests that validate behavior in one flow but leave equivalent flows uncovered.
-7. Special case handling for individual workflows under specific operation targets (local vs. remote) that could be unified; unified behavior will have a simpler description and fewer edge cases.
+4. Workflow code that re-computes defaults, paths, targets, or config fallback instead of consuming a resolved argument object.
+5. Features implemented in one command group but not structurally available to related command groups.
+6. CLI code in `main.py` that is doing business logic which should live in a module under `deploy/`.
+7. Tests that validate behavior in one flow but leave equivalent flows uncovered.
+8. Special case handling for individual workflows under specific operation targets (local vs. remote) that could be unified; unified behavior will have a simpler description and fewer edge cases.
 
 ## Procedure
 
@@ -45,15 +47,26 @@ Inspect the code for these patterns:
 2. Trace the current behavior through the CLI entrypoint and the relevant manager/helper modules.
 3. Group duplicated behavior by underlying concern, such as target resolution, ingress networking, config loading, or filesystem layout.
 4. Propose the smallest structural change that removes duplication at the source.
-5. If editing code, implement the shared abstraction first, then simplify the call sites.
+5. If editing code, implement the shared abstraction first, separating argument resolution from workflow execution, then simplify the call sites.
 6. Add or update tests so the shared behavior is covered in all affected flows.
 7. In the final response, report findings in priority order and explain why each one is structural rather than cosmetic.
+
+## Orthogonality Contract
+
+When designing or reviewing command flows, enforce this contract:
+
+1. Resolve: Convert CLI/config/session inputs into a resolved argument object with all defaults and fallback decisions finalized.
+2. Execute: Run workflow logic strictly from resolved arguments; avoid reading raw CLI/config again in execution steps.
+3. Persist on success: Write resolved configuration or session state only after successful execution.
+
+If a command cannot be described with this contract, treat it as a refactoring opportunity.
 
 ## Repo-Specific Heuristics
 
 - If the same local/remote rule appears in more than one command, consider `deploy/target.py` or the connection layer first.
 - If path or deployment metadata handling repeats, prefer centralization in the responsible manager module.
 - If the CLI is converting, normalizing, or reconciling inputs repeatedly, move that logic out of `main.py` unless it is strictly presentation-related.
+- If execution logic still depends on unresolved/raw arguments, add an explicit resolver seam and pass a resolved object through the workflow.
 - If proxy and service behavior must stay aligned, look for a shared representation rather than mirrored logic.
 - When you find a workflow that behaves differently under different operation targets, ask: can this be unified? Unified behavior is easier to describe, test, and maintain. A refactor that eliminates a special case is worth the effort.
 

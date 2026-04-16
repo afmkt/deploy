@@ -285,6 +285,7 @@ class DockerManager:
         try:
             size_mb = Path(local_path).stat().st_size / (1024 * 1024)
             console.print(f"[blue]Transferring {size_mb:.1f} MB → {remote_path}...[/blue]")
+            assert self.ssh.client is not None
             sftp = self.ssh.client.open_sftp()
             sftp.put(local_path, remote_path)
             sftp.close()

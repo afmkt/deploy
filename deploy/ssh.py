@@ -1,7 +1,7 @@
 """SSH connection management module using paramiko."""
 
 import socket
-from typing import Optional
+from typing import Any, Optional
 import paramiko
 from rich.console import Console
 
@@ -30,7 +30,7 @@ class SSHConnection:
         self.password = password
         self.key_filename = key_filename
         self.command_timeout = command_timeout
-        self.client = None
+        self.client: Optional[paramiko.SSHClient] = None
 
     def _target(self) -> str:
         """Return a human-friendly SSH target string."""
@@ -56,7 +56,7 @@ class SSHConnection:
             self.client = paramiko.SSHClient()
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            connect_kwargs = {
+            connect_kwargs: dict[str, Any] = {
                 "hostname": self.host,
                 "port": self.port,
                 "username": self.username,

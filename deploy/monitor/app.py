@@ -297,7 +297,7 @@ class MonitorApp(App):
         self.run_worker(self._run_action("proxy_up"), group="actions")
 
     def action_proxy_down(self) -> None:
-        def handle_confirm(confirmed: bool) -> None:
+        def handle_confirm(confirmed: bool | None) -> None:
             if confirmed:
                 self.run_worker(self._run_action("proxy_down"), group="actions")
 
@@ -319,7 +319,7 @@ class MonitorApp(App):
 
         service_name = self.selected_service
 
-        def handle_confirm(confirmed: bool) -> None:
+        def handle_confirm(confirmed: bool | None) -> None:
             if confirmed:
                 self.run_worker(self._run_action("service_down", target=service_name), group="actions")
 
@@ -335,7 +335,7 @@ class MonitorApp(App):
 
         service_name = self.selected_service
 
-        def handle_confirm(confirmed: bool) -> None:
+        def handle_confirm(confirmed: bool | None) -> None:
             if confirmed:
                 self.run_worker(self._run_action("service_restart", target=service_name), group="actions")
 

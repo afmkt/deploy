@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from rich.console import Console
 from .ssh import SSHConnection
 
@@ -211,7 +211,7 @@ class CaddyManager:
         public_services = []
         lines = config.split('\n')
         current_domain = None
-        current_config = []
+        current_config: list[str] = []
         brace_count = 0
 
         for line in lines:
@@ -624,7 +624,7 @@ class CaddyManager:
         from pathlib import Path
         from rich.prompt import Confirm
 
-        result = {
+        result: dict[str, list[str]] = {
             'imported': [],
             'skipped': [],
             'errors': []
@@ -916,7 +916,7 @@ class CaddyManager:
         # Join all entries with newlines
         return "\n\n".join(entries)
 
-    def _parse_template_entry(self, template_content: str) -> dict:
+    def _parse_template_entry(self, template_content: str) -> Optional[dict[str, Any]]:
         """Parse template content to extract entry information.
 
         Args:

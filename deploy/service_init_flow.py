@@ -8,11 +8,11 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
+from .ingress import normalize_ingress_networks
 from .service import (
     detect_fastapi_entrypoint,
     render_dockerfile,
     render_service_compose,
-    render_service_metadata,
     write_service_skill,
 )
 
@@ -33,6 +33,16 @@ class ServiceInitExecutionContext:
     force: bool
     entrypoint_file: str
     app_str: str
+    resolved_arguments: tuple["ResolvedArgument", ...]
+
+
+@dataclass(slots=True)
+class ResolvedArgument:
+    """A resolved argument value and where it originated from."""
+
+    name: str
+    value: str
+    origin: str
 
 
 @dataclass(slots=True)
@@ -68,6 +78,60 @@ class ServiceInitArgumentResolver:
 
         entrypoint_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
         effective_port = port or default_port
+        resolved_ingress_networks = tuple(normalize_ingress_networks(ingress_networks))
+
+        resolved_arguments = (
+            ResolvedArgument(
+                name="name",
+                value=service_name,
+                origin="cli (--name)" if name else "default (current directory name)",
+            ),
+            ResolvedArgument(
+                name="domain",
+                value=resolved_domain,
+                origin="cli (--domain)" if domain else "derived from resolved service name",
+            ),
+            ResolvedArgument(
+                name="port",
+                value=str(effective_port),
+                origin="cli (--port)" if port is not None else f"detected from {entrypoint_file}",
+            ),
+            ResolvedArgument(
+                name="image",
+                value=image or "<build from Dockerfile>",
+                origin="cli (--image)" if image else "default (compose build directive)",
+            ),
+            ResolvedArgument(
+                name="ingress_networks",
+                value=", ".join(resolved_ingress_networks),
+                origin="cli (--ingress-network)" if ingress_networks else "default (ingress)",
+            ),
+            ResolvedArgument(
+                name="global_ingress",
+                value=str(global_ingress).lower(),
+                origin="cli (--global-ingress)" if global_ingress else "default (--no-global-ingress)",
+            ),
+            ResolvedArgument(
+                name="path_prefix",
+                value=path_prefix or "<none>",
+                origin="cli (--path-prefix)" if path_prefix else "default (none)",
+            ),
+            ResolvedArgument(
+                name="internal",
+                value=str(internal).lower(),
+                origin="cli (--internal)" if internal else "default (false)",
+            ),
+            ResolvedArgument(
+                name="force",
+                value=str(force).lower(),
+                origin="cli (--force)" if force else "default (false)",
+            ),
+            ResolvedArgument(
+                name="entrypoint",
+                value=f"{entrypoint_file} -> {app_str}",
+                origin="detected from project files",
+            ),
+        )
 
         return ServiceInitResolutionResult(
             context=ServiceInitExecutionContext(
@@ -76,13 +140,14 @@ class ServiceInitArgumentResolver:
                 domain=resolved_domain,
                 port=effective_port,
                 image=image,
-                ingress_networks=tuple(ingress_networks),
+                ingress_networks=resolved_ingress_networks,
                 global_ingress=global_ingress,
                 path_prefix=path_prefix,
                 internal=internal,
                 force=force,
                 entrypoint_file=entrypoint_file,
                 app_str=app_str,
+                resolved_arguments=resolved_arguments,
             )
         )
 
@@ -97,17 +162,23 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
         border_style="blue",
     ))
     console.print(f"[dim]Detected entrypoint: {context.entrypoint_file} -> {context.app_str}[/dim]")
+    artifacts: list[tuple[str, Path, str]] = []
 
     dockerfile_path = context.project_dir / "Dockerfile"
+    dockerfile_existed = dockerfile_path.exists()
     if dockerfile_path.exists() and not context.force:
         console.print("[dim]Dockerfile already exists, skipping (use --force to overwrite)[/dim]")
+        artifacts.append(("Dockerfile", dockerfile_path, "skipped"))
     else:
         dockerfile_path.write_text(render_dockerfile(context.app_str, context.port))
         console.print(f"[green]✓ Wrote {dockerfile_path}[/green]")
+        artifacts.append(("Dockerfile", dockerfile_path, "overwritten" if dockerfile_existed else "created"))
 
     compose_path = context.project_dir / "docker-compose.yml"
+    compose_existed = compose_path.exists()
     if compose_path.exists() and not context.force:
         console.print("[dim]docker-compose.yml already exists, skipping (use --force to overwrite)[/dim]")
+        artifacts.append(("docker-compose.yml", compose_path, "skipped"))
     else:
         compose_content = render_service_compose(
             service_name=context.service_name,
@@ -121,21 +192,10 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
         )
         compose_path.write_text(compose_content)
         console.print(f"[green]✓ Wrote {compose_path}[/green]")
+        artifacts.append(("docker-compose.yml", compose_path, "overwritten" if compose_existed else "created"))
 
-    metadata_path = context.project_dir / ".deploy-service.json"
-    metadata_path.write_text(
-        render_service_metadata(
-            service_name=context.service_name,
-            domain=context.domain,
-            port=context.port,
-            image=context.image,
-            ingress_networks=context.ingress_networks,
-            exposure_scope="global" if context.global_ingress else "single",
-            path_prefix=context.path_prefix,
-            internal=context.internal,
-        )
-    )
-    console.print(f"[green]✓ Wrote {metadata_path}[/green]")
+    skill_file_path = context.project_dir / ".github/skills/deploy-service/SKILL.md"
+    skill_existed = skill_file_path.exists()
 
     skill_path = write_service_skill(
         project_dir=context.project_dir,
@@ -151,9 +211,29 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
     )
     if skill_path is None:
         console.print("[dim]Service skill already exists, skipping (use --force to overwrite)[/dim]")
+        artifacts.append(("service skill", skill_file_path, "skipped"))
     else:
         console.print(f"[green]✓ Wrote {skill_path}[/green]")
+        artifacts.append(("service skill", skill_path, "overwritten" if skill_existed else "created"))
 
     console.print("\n[bold green]✓ Service initialised[/bold green]")
-    console.print("  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
+    console.print("\n[bold]Summary[/bold]")
+    console.print("[bold]1. Created or updated artifacts[/bold]")
+    for label, path, status in artifacts:
+        console.print(f"  - {label}: {status} ({path})")
+
+    console.print("\n[bold]2. Resolved arguments (value <- origin)[/bold]")
+    for argument in context.resolved_arguments:
+        console.print(f"  - {argument.name}: {argument.value} [dim]<- {argument.origin}[/dim]")
+
+    console.print("\n[bold]3. Most likely customization points[/bold]")
+    console.print("  - Dockerfile: runtime base image, dependency install strategy, startup command")
+    console.print("  - docker-compose.yml: image/build mode, labels/routing, env vars, mounts, restart policy")
+    console.print("  - Flags to rerun with: --path-prefix, --ingress-network, --global-ingress, --internal, --force")
+
+    next_command = (
+        f"deploy service deploy -n {context.service_name} --host <host> --username <username>"
+    )
+    console.print("\n[bold]4. Most likely next command[/bold]")
+    console.print(f"  [dim]{next_command}[/dim]")
     return True

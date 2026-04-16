@@ -397,6 +397,33 @@ def test_service_init_writes_service_skill_file():
         assert "Domain/host: api.example.com" in skill_content
         assert "## Execution Contract" in skill_content
         assert "Persist on success" in skill_content
+        assert "1. Created or updated artifacts" in result.output
+        assert "2. Resolved arguments (value <- origin)" in result.output
+        assert "3. Most likely customization points" in result.output
+        assert "4. Most likely next command" in result.output
+
+
+def test_service_init_summary_reports_argument_origins_for_defaults():
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        Path("main.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+
+        result = runner.invoke(service, [
+            "init",
+            "--internal",
+        ])
+
+        assert result.exit_code == 0
+        assert "name:" in result.output
+        assert "default (current directory name)" in result.output
+        assert "domain:" in result.output
+        assert "derived from resolved service name" in result.output
+        assert "port: 8000" in result.output
+        assert "detected from main.py" in result.output
+        assert "ingress_networks: ingress" in result.output
+        assert "default (ingress)" in result.output
+        assert "deploy service deploy -n" in result.output
 
 
 def test_service_init_delegates_to_flow(monkeypatch):

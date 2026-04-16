@@ -112,7 +112,6 @@ This generates:
 
 - `Dockerfile`
 - `docker-compose.yml`
-- `.deploy-service.json` — local metadata (domain, port, image, networks)
 
 The directory name becomes the service name. Override with `--name` on later
 commands if needed.

@@ -269,7 +269,6 @@ Operation:
 
 - Detects FastAPI entrypoint
 - Generates Dockerfile and docker-compose.yml
-- Writes .deploy-service.json metadata
 - Writes service skill file
 
 Arguments:

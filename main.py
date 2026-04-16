@@ -560,7 +560,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
         sys.exit(1)
 
 
-@service.command(name="deploy")
+@service.command(name="up")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
 @click.option("--rebuild", is_flag=True, default=False,
@@ -578,7 +578,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
               help="Load SSH args from saved config")
 @click.option("--interactive/--no-interactive", default=True,
               help="Interactive mode")
-def service_deploy(name, deploy_path, rebuild, missing_image_action, auto_sync_context,
+def service_up(name, deploy_path, rebuild, missing_image_action, auto_sync_context,
                    host, ssh_port, username, key, password, use_config, interactive):
     """Deploy a service image to the deployment target and register with ingress.
 

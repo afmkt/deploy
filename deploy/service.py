@@ -251,7 +251,6 @@ def render_service_skill(
 
         - Dockerfile: generated and owned by `deploy service init`
         - Compose file: `docker-compose.yml`
-        - Service metadata: `.deploy-service.json`
         - Skill file: `.github/skills/deploy-service/SKILL.md`
 
         ## Command Workflow
@@ -300,10 +299,10 @@ def render_service_skill(
 
         ## Operational Guidance
 
-        - Prefer metadata-driven deploys by keeping `.deploy-service.json` accurate.
+        - `deploy service deploy` persists remote runtime metadata at `{SERVICES_DIR}/{service_name}/.deploy-service.json`.
         - Update routing by editing `docker-compose.yml` or re-running `service init`.
         - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
-        - Use `deploy service down -n {service_name}` to stop without deleting metadata.
+        - Use `deploy service down -n {service_name}` to stop without deleting remote metadata.
         - For local development, set `--host localhost` to run workflows locally.
         """
     )

@@ -238,7 +238,6 @@ This generates:
 
 - `Dockerfile`
 - `docker-compose.yml`
-- `.deploy-service.json` — local service metadata (domain, port, image, networks)
 - `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance
 
 ### Deploy Service to Target
@@ -555,7 +554,7 @@ Scaffold and deploy Docker-based services.
 
 #### `deploy service init`
 
-Scaffold `Dockerfile`, `docker-compose.yml`, and `.deploy-service.json` in the current directory.
+Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the current directory.
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|

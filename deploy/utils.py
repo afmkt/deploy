@@ -75,7 +75,11 @@ def validate_path(path: str) -> bool:
         return False
 
 
-def prompt_connection_details() -> dict:
+def prompt_connection_details(
+    default_host: Optional[str] = None,
+    default_port: int = 22,
+    default_username: Optional[str] = None,
+) -> dict:
     """Prompt user for SSH connection details.
 
     Returns:
@@ -83,21 +87,21 @@ def prompt_connection_details() -> dict:
     """
     console.print("\n[bold blue]SSH Connection Details[/bold blue]")
 
-    host = Prompt.ask("Host (hostname or IP)")
+    host = Prompt.ask("Host (hostname or IP)", default=default_host or "")
     if not validate_host(host):
         console.print("[red]✗ Invalid host[/red]")
         sys.exit(1)
 
-    port = Prompt.ask("Port", default="22")
+    raw_port = Prompt.ask("Port", default=str(default_port))
     try:
-        port = int(port)
+        port = int(raw_port)
         if not validate_port(port):
             raise ValueError
     except ValueError:
         console.print("[red]✗ Invalid port number[/red]")
         sys.exit(1)
 
-    username = Prompt.ask("Username")
+    username = Prompt.ask("Username", default=default_username or "")
     if not username:
         console.print("[red]✗ Username is required[/red]")
         sys.exit(1)

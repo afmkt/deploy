@@ -9,6 +9,9 @@ from deploy.service import (
     render_dockerfile,
     render_service_metadata,
     render_service_compose,
+    render_service_skill,
+    write_service_skill,
+    SERVICE_SKILL_PATH,
     ServiceManager,
 )
 from deploy.ingress import INGRESS_NETWORK
@@ -253,6 +256,52 @@ def test_render_service_metadata_defaults_path_prefix_null():
     metadata = render_service_metadata("mysvc", "api.example.com", 8000)
     assert '"path_prefix": null' in metadata
     assert '"internal": false' in metadata
+
+
+def test_render_service_skill_contains_profile_and_commands():
+    skill = render_service_skill(
+        service_name="auth-api",
+        domain="auth.example.com",
+        port=8000,
+        image="auth-api:latest",
+        ingress_networks=["ingress", "app-a"],
+        exposure_scope="global",
+        path_prefix="/api/auth",
+    )
+    assert "Service Deployment Skill: auth-api" in skill
+    assert "Domain/host: auth.example.com" in skill
+    assert "Path prefix: /api/auth" in skill
+    assert "Ingress networks: ingress, app-a" in skill
+    assert "deploy service deploy -n auth-api -d auth.example.com -i auth-api:latest" in skill
+
+
+def test_write_service_skill_creates_file(tmp_path):
+    written = write_service_skill(
+        project_dir=tmp_path,
+        service_name="mysvc",
+        domain="api.example.com",
+        port=8000,
+    )
+    assert written == (tmp_path / SERVICE_SKILL_PATH)
+    assert written.exists()
+    assert "Service Deployment Skill: mysvc" in written.read_text()
+
+
+def test_write_service_skill_skips_existing_without_force(tmp_path):
+    skill_path = tmp_path / SERVICE_SKILL_PATH
+    skill_path.parent.mkdir(parents=True)
+    skill_path.write_text("original")
+
+    written = write_service_skill(
+        project_dir=tmp_path,
+        service_name="mysvc",
+        domain="api.example.com",
+        port=8000,
+        force=False,
+    )
+
+    assert written is None
+    assert skill_path.read_text() == "original"
 
 
 def test_reconcile_global_services_forwards_path_prefix():

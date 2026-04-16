@@ -1,5 +1,7 @@
 import pytest
 from click.testing import CliRunner
+from pathlib import Path
+from types import SimpleNamespace
 from main import main
 from main import proxy
 from main import service
@@ -11,7 +13,383 @@ def test_main_help():
     assert result.exit_code == 0
     assert "Git SSH Deploy Tool" in result.output
     assert "--repo-path" in result.output
-    assert "--target" in result.output
+
+
+def test_push_persists_args_only_after_success(monkeypatch):
+    runner = CliRunner()
+    persisted = {}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, *, repo_path, deploy_path, profile):
+            return SimpleNamespace(
+                used_saved_args=False,
+                context=SimpleNamespace(repo_path=repo_path, deploy_path=deploy_path, profile=profile),
+            )
+
+    def fake_execute_push(context, console, *, dry_run=False):
+        return True
+
+    def fake_persist(config, context):
+        persisted["repo_path"] = context.repo_path
+        persisted["deploy_path"] = context.deploy_path
+
+    monkeypatch.setattr(main_module, "PushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_push", fake_execute_push)
+    monkeypatch.setattr(main_module, "persist_push_resolution", fake_persist)
+    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+
+    result = runner.invoke(main, [
+        "--repo-path", ".",
+        "--deploy-path", "/tmp/deploy/repos",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 0
+    assert persisted == {
+        "repo_path": ".",
+        "deploy_path": "/tmp/deploy/repos",
+    }
+
+
+def test_push_does_not_persist_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, *, repo_path, deploy_path, profile):
+            return SimpleNamespace(
+                used_saved_args=False,
+                context=SimpleNamespace(repo_path=repo_path, deploy_path=deploy_path, profile=profile),
+            )
+
+    def fake_execute_push(context, console, *, dry_run=False):
+        return False
+
+    def fake_persist(config, context):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "PushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_push", fake_execute_push)
+    monkeypatch.setattr(main_module, "persist_push_resolution", fake_persist)
+
+    result = runner.invoke(main, [
+        "--repo-path", ".",
+        "--deploy-path", "/tmp/deploy/repos",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 1
+    assert persisted["called"] is False
+
+
+def test_pull_persists_args_only_after_success(monkeypatch):
+    runner = CliRunner()
+    persisted = {}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                used_saved_args=False,
+                context=SimpleNamespace(
+                    repo_path=kwargs["repo_path"],
+                    deploy_path=kwargs["deploy_path"],
+                    profile=kwargs["profile"],
+                    commit=kwargs["commit"],
+                    sync_remote=kwargs["sync_remote"],
+                    branch=kwargs["branch"],
+                ),
+            )
+
+    def fake_execute_pull(context, console, *, dry_run=False):
+        return True
+
+    def fake_persist(config, context):
+        persisted["repo_path"] = context.repo_path
+        persisted["deploy_path"] = context.deploy_path
+
+    monkeypatch.setattr(main_module, "PullArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_pull", fake_execute_pull)
+    monkeypatch.setattr(main_module, "persist_pull_resolution", fake_persist)
+    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+
+    result = runner.invoke(main_module.pull, [
+        "--repo-path", ".",
+        "--deploy-path", "/tmp/deploy/repos",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 0
+    assert persisted == {
+        "repo_path": ".",
+        "deploy_path": "/tmp/deploy/repos",
+    }
+
+
+def test_pull_does_not_persist_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                used_saved_args=False,
+                context=SimpleNamespace(
+                    repo_path=kwargs["repo_path"],
+                    deploy_path=kwargs["deploy_path"],
+                    profile=kwargs["profile"],
+                    commit=kwargs["commit"],
+                    sync_remote=kwargs["sync_remote"],
+                    branch=kwargs["branch"],
+                ),
+            )
+
+    def fake_execute_pull(context, console, *, dry_run=False):
+        return False
+
+    def fake_persist(config, context):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "PullArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_pull", fake_execute_pull)
+    monkeypatch.setattr(main_module, "persist_pull_resolution", fake_persist)
+
+    result = runner.invoke(main_module.pull, [
+        "--repo-path", ".",
+        "--deploy-path", "/tmp/deploy/repos",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 1
+    assert persisted["called"] is False
+    
+
+def test_proxy_up_persists_args_only_after_success(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    profile=kwargs["profile"],
+                    networks=("ingress",),
+                    migrate_native_caddy=kwargs["migrate_native_caddy"],
+                    interactive=kwargs["interactive"],
+                )
+            )
+
+    def fake_execute(context, console, docker_push_command):
+        return True, SimpleNamespace(host="localhost", port=22, username="tester", key_filename=None)
+
+    def fake_persist(config, connection):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "ProxyUpArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_proxy_up", fake_execute)
+    monkeypatch.setattr(main_module, "persist_proxy_up_resolution", fake_persist)
+
+    result = runner.invoke(proxy, [
+        "up",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 0
+    assert persisted["called"] is True
+
+
+def test_proxy_up_does_not_persist_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    profile=kwargs["profile"],
+                    networks=("ingress",),
+                    migrate_native_caddy=kwargs["migrate_native_caddy"],
+                    interactive=kwargs["interactive"],
+                )
+            )
+
+    def fake_execute(context, console, docker_push_command):
+        return False, None
+
+    def fake_persist(config, connection):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "ProxyUpArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_proxy_up", fake_execute)
+    monkeypatch.setattr(main_module, "persist_proxy_up_resolution", fake_persist)
+
+    result = runner.invoke(proxy, [
+        "up",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 1
+    assert persisted["called"] is False
+
+
+def test_service_deploy_persists_args_only_after_success(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            pass
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    service_name="myapp",
+                    image="myapp:latest",
+                    domain="example.com",
+                    port=8000,
+                    deploy_path=None,
+                    use_config=False,
+                    rebuild=False,
+                    allow_remote_domain_fallback=False,
+                    missing_image_action="ask",
+                    auto_sync_context=True,
+                    ingress_networks=("ingress",),
+                    global_ingress=False,
+                    path_prefix=None,
+                    internal=False,
+                    profile=kwargs["profile"],
+                    interactive=kwargs["interactive"],
+                )
+            )
+
+    def fake_execute(context, console, *, config, push_command, docker_push_command):
+        return True, SimpleNamespace(host="localhost", port=22, username="tester", key_filename=None)
+
+    def fake_persist(config, connection):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "ServiceDeployArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_service_deploy", fake_execute)
+    monkeypatch.setattr(main_module, "persist_service_deploy_resolution", fake_persist)
+
+    result = runner.invoke(service, [
+        "deploy",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+        "--domain", "example.com",
+        "--image", "myapp:latest",
+    ])
+
+    assert result.exit_code == 0
+    assert persisted["called"] is True
+
+
+def test_service_deploy_does_not_persist_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            pass
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    service_name="myapp",
+                    image="myapp:latest",
+                    domain="example.com",
+                    port=8000,
+                    deploy_path=None,
+                    use_config=False,
+                    rebuild=False,
+                    allow_remote_domain_fallback=False,
+                    missing_image_action="ask",
+                    auto_sync_context=True,
+                    ingress_networks=("ingress",),
+                    global_ingress=False,
+                    path_prefix=None,
+                    internal=False,
+                    profile=kwargs["profile"],
+                    interactive=kwargs["interactive"],
+                )
+            )
+
+    def fake_execute(context, console, *, config, push_command, docker_push_command):
+        return False, None
+
+    def fake_persist(config, connection):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "ServiceDeployArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_service_deploy", fake_execute)
+    monkeypatch.setattr(main_module, "persist_service_deploy_resolution", fake_persist)
+
+    result = runner.invoke(service, [
+        "deploy",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+        "--domain", "example.com",
+        "--image", "myapp:latest",
+    ])
+
+    assert result.exit_code == 1
+    assert persisted["called"] is False
+
+
+def test_service_init_writes_service_skill_file():
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(service, [
+            "init",
+            "--domain", "api.example.com",
+            "--name", "api",
+            "--port", "8000",
+        ])
+
+        assert result.exit_code == 0
+        assert ".github/skills/deploy-service/SKILL.md" in result.output
+
+        skill_path = Path(".github/skills/deploy-service/SKILL.md")
+        assert skill_path.exists()
+        skill_content = skill_path.read_text()
+        assert "Service Deployment Skill: api" in skill_content
+        assert "Domain/host: api.example.com" in skill_content
 
 
 def test_service_deploy_local_auto_push_stays_local(monkeypatch):
@@ -82,9 +460,9 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
             return FakeResult()
         return original_invoke(self, command, args, **kwargs)
 
-    monkeypatch.setattr(main_module, "_build_connection_from_config", fake_build_connection_from_config)
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
     monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: "push")
     monkeypatch.setattr("click.testing.CliRunner.invoke", fake_invoke)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
@@ -92,8 +470,7 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--image", "repo/app:latest",
+        "--host", "localhost", "--image", "repo/app:latest",
         "--domain", "app.example.com",
         "--no-use-config",
     ])
@@ -187,18 +564,17 @@ def test_service_deploy_remote_build_on_missing_image(monkeypatch):
         def get_current_revision(self):
             return "abc123"
 
-    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *args, **kwargs: FakeConnection())
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
-    monkeypatch.setattr(main_module, "GitRepository", FakeGitRepository)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.GitRepository", FakeGitRepository)
     monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: "build")
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--image", "repo/app:latest",
+        "--host", "localhost", "--image", "repo/app:latest",
         "--domain", "app.example.com",
         "--deploy-path", "/tmp/deploy/repos",
         "--no-use-config",
@@ -257,8 +633,7 @@ def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(mon
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--domain", "app.example.com",
+        "--host", "localhost", "--domain", "app.example.com",
         "--no-use-config",
         "--no-interactive",
     ])
@@ -311,8 +686,7 @@ def test_service_deploy_non_interactive_build_requires_deploy_path(monkeypatch):
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--image", "repo/app:latest",
+        "--host", "localhost", "--image", "repo/app:latest",
         "--domain", "app.example.com",
         "--no-use-config",
         "--no-interactive",
@@ -327,7 +701,6 @@ def test_build_connection_uses_local_for_localhost_host():
     from deploy.session import build_connection, ConnectionProfile
 
     profile = ConnectionProfile(
-        target="remote",
         host="localhost",
         port=22,
         username="",
@@ -655,8 +1028,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
 
         result = runner.invoke(service, [
             "deploy",
-            "--target", "local",
-            "--no-use-config",
+            "--host", "localhost", "--no-use-config",
         ])
 
         assert result.exit_code == 0, result.output
@@ -703,8 +1075,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
 
         result = runner.invoke(service, [
             "deploy",
-            "--target", "local",
-            "--no-use-config",
+            "--host", "localhost", "--no-use-config",
             "--no-interactive",
         ])
 
@@ -781,8 +1152,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
 
         result = runner.invoke(service, [
             "deploy",
-            "--target", "local",
-            "--no-use-config",
+            "--host", "localhost", "--no-use-config",
             "--no-interactive",
         ])
 
@@ -849,16 +1219,15 @@ def test_service_deploy_refuses_remote_domain_fallback_non_interactive(monkeypat
             return None
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *a, **kw: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--no-use-config",
+        "--host", "localhost", "--no-use-config",
         "--no-interactive",
     ])
 
@@ -926,16 +1295,15 @@ def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp
             return None
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *a, **kw: FakeConnection())
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *a, **kw: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
     result = runner.invoke(service, [
         "deploy",
-        "--target", "local",
-        "--no-use-config",
+        "--host", "localhost", "--no-use-config",
         "--no-interactive",
         "--allow-remote-domain-fallback",
     ])
@@ -976,7 +1344,7 @@ def test_service_status_shows_logs(monkeypatch):
     monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
-    result = runner.invoke(service, ["status", "--name", "myapp", "--target", "local", "--no-use-config"])
+    result = runner.invoke(service, ["status", "--name", "myapp", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0, result.output
     assert "myapp" in result.output
@@ -1016,7 +1384,7 @@ def test_service_status_restarting_shows_logs(monkeypatch):
     monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
-    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+    result = runner.invoke(service, ["status", "--name", "auth", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0, result.output
     assert "restarting" in result.output
@@ -1055,7 +1423,7 @@ def test_service_status_no_logs_skips_section(monkeypatch):
     monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
-    result = runner.invoke(service, ["status", "--name", "myapp", "--target", "local", "--no-use-config"])
+    result = runner.invoke(service, ["status", "--name", "myapp", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0, result.output
     assert "Recent logs" not in result.output
@@ -1098,7 +1466,7 @@ def test_service_status_warns_on_route_host_metadata_mismatch(monkeypatch):
     monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
-    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+    result = runner.invoke(service, ["status", "--name", "auth", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0, result.output
     assert "Route host: x.com" in result.output
@@ -1148,7 +1516,7 @@ def test_service_status_localhost_http_only_message(monkeypatch):
     monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
-    result = runner.invoke(service, ["status", "--name", "auth", "--target", "local", "--no-use-config"])
+    result = runner.invoke(service, ["status", "--name", "auth", "--host", "localhost", "--no-use-config"])
 
     assert result.exit_code == 0, result.output
     assert "Route host: localhost" in result.output

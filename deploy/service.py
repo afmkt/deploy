@@ -24,6 +24,7 @@ _FASTAPI_ENTRYPOINT_CANDIDATES = [
 ]
 _FASTAPI_IMPORTS = ["from fastapi", "import fastapi", "FastAPI("]
 _LOCAL_HTTP_ONLY_HOSTS = {"localhost", "127.0.0.1", "::1"}
+SERVICE_SKILL_PATH = Path(".github/skills/deploy-service/SKILL.md")
 
 
 def _primary_site_token(value: str) -> str:
@@ -202,6 +203,111 @@ def render_service_metadata(
         "internal": internal,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def render_service_skill(
+    service_name: str,
+    domain: str,
+    port: int,
+    image: Optional[str] = None,
+    ingress_networks: Optional[Sequence[str]] = None,
+    exposure_scope: str = "single",
+    path_prefix: Optional[str] = None,
+    internal: bool = False,
+) -> str:
+    """Render a service-specific skill file for deployment and operations."""
+    normalized_networks = normalize_ingress_networks(ingress_networks)
+    image_value = image or f"{service_name}:latest"
+    networks_value = ", ".join(normalized_networks)
+    route_scope = "Internal only" if internal else "Public ingress"
+    route_path = path_prefix or "/"
+
+    return textwrap.dedent(
+        f"""\
+        ---
+        name: deploy-{service_name}
+        description: Deploy and manage the {service_name} service with the local deploy CLI.
+        argument-hint: Ask for deploy commands, routing, redeploy, and troubleshooting for {service_name}.
+        user-invocable: true
+        disable-model-invocation: false
+        ---
+
+        # Service Deployment Skill: {service_name}
+
+        Use this skill whenever a developer asks how to deploy, update, or operate this service.
+
+        ## Service Profile
+
+        - Service name: {service_name}
+        - Domain/host: {domain}
+        - Container port: {port}
+        - Image default: {image_value}
+        - Exposure scope: {route_scope}
+        - Path prefix: {route_path}
+        - Ingress networks: {networks_value}
+        - Global ingress mode: {exposure_scope}
+
+        ## Project Artifacts
+
+        - Dockerfile: generated and owned by `deploy service init`
+        - Compose file: `docker-compose.yml`
+        - Service metadata: `.deploy-service.json`
+        - Skill file: `.github/skills/deploy-service/SKILL.md`
+
+        ## Command Workflow
+
+        1. Scaffold or refresh files:
+           `deploy service init -n {service_name} -d {domain}`
+        2. Sync source to target when needed:
+           `deploy push`
+        3. Ensure ingress proxy is running:
+           `deploy proxy up`
+        4. Deploy service:
+           `deploy service deploy -n {service_name} -d {domain} -i {image_value}`
+        5. Check runtime state:
+           `deploy service status -n {service_name}`
+
+        ## Operational Guidance
+
+        - Prefer metadata-driven deploys by keeping `.deploy-service.json` accurate.
+        - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
+        - Use `deploy service down -n {service_name}` to stop without deleting metadata.
+        - For local development, set `--host localhost` on deploy commands.
+        """
+    )
+
+
+def write_service_skill(
+    project_dir: Path,
+    service_name: str,
+    domain: str,
+    port: int,
+    image: Optional[str] = None,
+    ingress_networks: Optional[Sequence[str]] = None,
+    exposure_scope: str = "single",
+    path_prefix: Optional[str] = None,
+    internal: bool = False,
+    force: bool = False,
+) -> Optional[Path]:
+    """Write the service deployment skill file in the target repository."""
+    skill_path = project_dir / SERVICE_SKILL_PATH
+    if skill_path.exists() and not force:
+        return None
+
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(
+        render_service_skill(
+            service_name=service_name,
+            domain=domain,
+            port=port,
+            image=image,
+            ingress_networks=ingress_networks,
+            exposure_scope=exposure_scope,
+            path_prefix=path_prefix,
+            internal=internal,
+        )
+    )
+    return skill_path
 
 
 class ServiceManager:

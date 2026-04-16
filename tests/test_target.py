@@ -24,11 +24,11 @@ def test_is_local_host_aliases():
 
 
 def test_resolve_target_prefers_localhost():
-    assert resolve_target("remote", "local") == "local"
-    assert resolve_target("remote", "localhost") == "local"
-    assert resolve_target("remote", "example.com") == "remote"
-    assert resolve_target("auto", None) == "local"
-    assert resolve_target("local", "example.com") == "remote"
+    assert resolve_target("local") == "local"
+    assert resolve_target("localhost") == "local"
+    assert resolve_target("example.com") == "remote"
+    assert resolve_target(None) == "local"
+    assert resolve_target("") == "local"
 
 
 def test_display_target_local_and_remote():

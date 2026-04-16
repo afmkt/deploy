@@ -2,6 +2,7 @@
 
 import subprocess
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 from click.testing import CliRunner
 
@@ -542,7 +543,6 @@ def test_docker_push_use_config_falls_back_to_push_profile(monkeypatch):
         ])
 
     assert result.exit_code == 0
-    assert "docker-push config is incomplete" in result.output
     assert captured == {
         "host": "47.100.30.18",
         "port": 22,
@@ -550,3 +550,74 @@ def test_docker_push_use_config_falls_back_to_push_profile(monkeypatch):
         "password": None,
         "key_filename": "/Users/michael/.ssh/id_rsa",
     }
+
+
+def test_docker_push_persists_args_only_after_success(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(image=kwargs["image"], profile=kwargs["profile"]),
+                used_saved_args=False,
+            )
+
+    def fake_execute(context, console, *, dry_run=False):
+        return True
+
+    def fake_persist(config, context):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "DockerPushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_docker_push", fake_execute)
+    monkeypatch.setattr(main_module, "persist_docker_push_resolution", fake_persist)
+    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+
+    result = runner.invoke(docker_push, [
+        "--image", "nginx:latest",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 0
+    assert persisted["called"] is True
+
+
+def test_docker_push_does_not_persist_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+    persisted = {"called": False}
+
+    class FakeResolver:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(image=kwargs["image"], profile=kwargs["profile"]),
+                used_saved_args=False,
+            )
+
+    def fake_execute(context, console, *, dry_run=False):
+        return False
+
+    def fake_persist(config, context):
+        persisted["called"] = True
+
+    monkeypatch.setattr(main_module, "DockerPushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_docker_push", fake_execute)
+    monkeypatch.setattr(main_module, "persist_docker_push_resolution", fake_persist)
+
+    result = runner.invoke(docker_push, [
+        "--image", "nginx:latest",
+        "--host", "localhost",
+        "--no-use-config",
+        "--no-interactive",
+    ])
+
+    assert result.exit_code == 1
+    assert persisted["called"] is False

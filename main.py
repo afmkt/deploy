@@ -512,12 +512,12 @@ def proxy_diagnose(host, port, username, key, password, use_config, lines):
 # ---------------------------------------------------------------------------
 
 @click.group()
-def service():
+def svc():
     """Scaffold and deploy Docker-based services (FastAPI first-class)."""
     pass
 
 
-@service.command(name="init")
+@svc.command(name="init")
 @click.option("--domain", "-d", default=None,
               help="Public domain or hostname for this service (e.g. api.example.com). Required unless --internal is set.")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
@@ -560,7 +560,7 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
         sys.exit(1)
 
 
-@service.command(name="up")
+@svc.command(name="up")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
 @click.option("--rebuild", is_flag=True, default=False,
@@ -620,7 +620,7 @@ def service_up(name, deploy_path, rebuild, missing_image_action, auto_sync_conte
     persist_service_deploy_resolution(config, connection)
 
 
-@service.command(name="status")
+@svc.command(name="status")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--port", "-p", default=22, help="SSH port")
@@ -717,7 +717,7 @@ def service_status(name, host, port, username, key, password, use_config):
         sys.exit(1)
 
 
-@service.command(name="down")
+@svc.command(name="down")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--port", "-p", default=22, help="SSH port")

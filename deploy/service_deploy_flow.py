@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,19 +34,11 @@ class ServiceDeployExecutionContext:
     """Fully resolved arguments required to execute deploy service deploy."""
 
     service_name: str
-    image: str | None
-    domain: str | None
-    port: int
     deploy_path: str | None
     use_config: bool
     rebuild: bool
-    allow_remote_domain_fallback: bool
     missing_image_action: str
     auto_sync_context: bool
-    ingress_networks: tuple[str, ...]
-    global_ingress: bool
-    path_prefix: str | None
-    internal: bool
     profile: ConnectionProfile
     interactive: bool
 
@@ -70,18 +61,10 @@ class ServiceDeployArgumentResolver:
         config: DeployConfig,
         *,
         name: str | None,
-        image: str | None,
-        domain: str | None,
-        port: int,
         deploy_path: str | None,
         rebuild: bool,
-        allow_remote_domain_fallback: bool,
         missing_image_action: str,
         auto_sync_context: bool,
-        ingress_networks: tuple[str, ...],
-        global_ingress: bool,
-        path_prefix: str | None,
-        internal: bool,
         profile: ConnectionProfile,
         interactive: bool,
     ) -> ServiceDeployResolutionResult | None:
@@ -96,19 +79,11 @@ class ServiceDeployArgumentResolver:
         return ServiceDeployResolutionResult(
             context=ServiceDeployExecutionContext(
                 service_name=service_name,
-                image=image,
-                domain=domain,
-                port=port,
                 deploy_path=deploy_path,
                 use_config=self.use_config,
                 rebuild=rebuild,
-                allow_remote_domain_fallback=allow_remote_domain_fallback,
                 missing_image_action=missing_image_action,
                 auto_sync_context=auto_sync_context,
-                ingress_networks=tuple(normalize_ingress_networks(ingress_networks)),
-                global_ingress=global_ingress,
-                path_prefix=path_prefix,
-                internal=internal,
                 profile=completed_profile,
                 interactive=interactive,
             )
@@ -130,39 +105,40 @@ def execute_service_deploy(
         with managed_connection(ssh):
             svc_mgr = ServiceManager(ssh)
             proxy_mgr = ProxyManager(ssh)
-
-            domain = context.domain
             service_name = context.service_name
-            image = context.image
+
+            local_definition = _load_local_service_definition(service_name)
+            if local_definition is None:
+                console.print(
+                    "[red]✗ docker-compose.yml is required. Run deploy service init first or provide a scaffolded compose file.[/red]"
+                )
+                return False, None
+
+            domain = local_definition["domain"]
+            internal = bool(local_definition["internal"])
+            path_prefix = local_definition["path_prefix"]
+            port = int(local_definition["port"])
+            global_ingress = bool(local_definition["global_ingress"])
+            ingress_networks = tuple(normalize_ingress_networks(local_definition["ingress_networks"]))
 
             # Internal services don't need a routable domain; use the service
             # name as a stable placeholder so metadata remains well-formed.
-            if context.internal and not domain:
+            if internal and not domain:
                 domain = service_name
+            if not domain and not internal:
+                console.print(
+                    "[red]✗ docker-compose.yml must include a caddy host label for non-internal services.[/red]"
+                )
+                return False, None
 
-            domain, domain_source = _resolve_service_domain_with_source(domain, service_name, svc_mgr)
-            if not domain:
-                if context.internal:
-                    domain = service_name
-                elif not context.interactive:
-                    console.print(
-                        "[red]✗ Domain is required in non-interactive mode. Provide --domain or save domain in metadata.[/red]"
-                    )
-                    return False, None
-                else:
-                    from rich.prompt import Prompt
-
-                    domain = Prompt.ask("Public domain / hostname")
-                    if not domain:
-                        console.print("[red]✗ Domain is required[/red]")
-                        return False, None
+            image = local_definition["image"] or _default_service_image_name(service_name)
 
             console.print(Panel.fit(
                 f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
-                f"Image: {image or '<auto-resolve>'}  Domain: {domain}  Port: {context.port}\n"
+                f"Image: {image}  Domain: {domain}  Port: {port}\n"
                 f"Target: {display_target(ssh)}\n"
-                + (f"Path prefix: {context.path_prefix}\n" if context.path_prefix else "")
-                + (f"Mode: internal (no ingress)\n" if context.internal else f"Ingress: {'all configured networks' if context.global_ingress else ', '.join(context.ingress_networks)}"),
+                + (f"Path prefix: {path_prefix}\n" if path_prefix else "")
+                + (f"Mode: internal (no ingress)\n" if internal else f"Ingress: {'all configured networks' if global_ingress else ', '.join(ingress_networks)}"),
                 border_style="blue",
             ))
 
@@ -170,33 +146,6 @@ def execute_service_deploy(
             current_routed_host = routed_host_getter(service_name) if callable(routed_host_getter) else None
             if current_routed_host:
                 console.print(f"[dim]Current routed host: {current_routed_host}[/dim]")
-            if domain_source == "remote-metadata":
-                console.print(
-                    "[yellow]⚠ Domain resolved from persisted target metadata. "
-                    "Use --domain to override stale routing.[/yellow]"
-                )
-                console.print(
-                    "[dim]Example: deploy service deploy --name "
-                    f"{service_name} --domain localhost[/dim]"
-                )
-                if not context.allow_remote_domain_fallback:
-                    if not context.interactive:
-                        console.print(
-                            "[red]✗ Refusing remote metadata domain fallback in non-interactive mode. "
-                            "Provide --domain or pass --allow-remote-domain-fallback.[/red]"
-                        )
-                        return False, None
-
-                    from rich.prompt import Confirm
-
-                    if not Confirm.ask(
-                        "Proceed using persisted target metadata domain?",
-                        default=False,
-                    ):
-                        console.print(
-                            "[yellow]Aborted. Provide --domain to set routing explicitly.[/yellow]"
-                        )
-                        return False, None
 
             # Step 1: check ingress proxy is running
             console.print("\n[bold]Step 1: Check ingress proxy[/bold]")
@@ -207,24 +156,6 @@ def execute_service_deploy(
 
             # Step 2: check image availability on remote
             console.print("\n[bold]Step 2: Check image on target[/bold]")
-            resolved_image = _resolve_service_image(image, service_name, svc_mgr)
-            if not resolved_image:
-                if not context.interactive:
-                    console.print(
-                        "[red]✗ Image name is required in non-interactive mode. Provide --image or save image in metadata.[/red]"
-                    )
-                    return False, None
-                from rich.prompt import Prompt
-
-                resolved_image = Prompt.ask(
-                    "Docker image name for target build/use",
-                    default=_default_service_image_name(service_name),
-                )
-                if not resolved_image:
-                    console.print("[red]✗ Image name is required[/red]")
-                    return False, None
-
-            image = resolved_image
             image_missing = not svc_mgr.image_exists_remote(image)
             if image_missing or context.rebuild:
                 if context.rebuild and not image_missing:
@@ -355,7 +286,7 @@ def execute_service_deploy(
                 console.print(f"[green]✓ Image '{image}' found on target[/green]")
 
             effective_networks = (
-                proxy_mgr.get_configured_ingress_networks() if context.global_ingress else context.ingress_networks
+                proxy_mgr.get_configured_ingress_networks() if global_ingress else ingress_networks
             )
 
             # Step 3: ensure service directory and compose file
@@ -365,24 +296,24 @@ def execute_service_deploy(
             compose_content = render_service_compose(
                 service_name=service_name,
                 domain=domain,
-                port=context.port,
+                port=port,
                 image=image,
                 ingress_networks=effective_networks,
-                exposure_scope="global" if context.global_ingress else "single",
-                path_prefix=context.path_prefix,
-                internal=context.internal,
+                exposure_scope="global" if global_ingress else "single",
+                path_prefix=path_prefix,
+                internal=internal,
             )
             if not svc_mgr.upload_compose(service_name, compose_content):
                 return False, None
             metadata_content = render_service_metadata(
                 service_name=service_name,
                 domain=domain,
-                port=context.port,
+                port=port,
                 image=image,
                 ingress_networks=effective_networks,
-                exposure_scope="global" if context.global_ingress else "single",
-                path_prefix=context.path_prefix,
-                internal=context.internal,
+                exposure_scope="global" if global_ingress else "single",
+                path_prefix=path_prefix,
+                internal=internal,
             )
             if not svc_mgr.upload_metadata(service_name, metadata_content):
                 return False, None
@@ -397,10 +328,10 @@ def execute_service_deploy(
 
             console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
             console.print(f"  Domain : {domain}")
-            if context.path_prefix:
-                console.print(f"  Path   : {context.path_prefix}")
+            if path_prefix:
+                console.print(f"  Path   : {path_prefix}")
             console.print(f"  Status : {status}")
-            console.print(f"  Exposure: {'internal' if context.internal else 'global' if context.global_ingress else 'single-network'}")
+            console.print(f"  Exposure: {'internal' if internal else 'global' if global_ingress else 'single-network'}")
             if container_ip:
                 console.print(f"  Container IP: {container_ip}")
 
@@ -420,34 +351,38 @@ def persist_service_deploy_resolution(config: DeployConfig, connection: Any) -> 
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _load_local_service_metadata() -> dict:
-    """Load local service metadata from the current working directory."""
-    local_metadata_path = Path(".deploy-service.json")
-    if not local_metadata_path.exists():
-        return {}
-    try:
-        loaded = json.loads(local_metadata_path.read_text())
-    except Exception:
-        return {}
-    if not isinstance(loaded, dict):
-        return {}
-    return loaded
-
-
-def _resolve_service_metadata_field(field: str, service_name: str, svc_mgr: ServiceManager) -> str | None:
-    """Resolve a service metadata field from local metadata first, then target metadata."""
-    local_metadata = _load_local_service_metadata()
-    local_value = local_metadata.get(field)
-    if isinstance(local_value, str) and local_value.strip():
-        return local_value
-
-    remote_metadata = svc_mgr.read_service_metadata(service_name)
-    if not isinstance(remote_metadata, dict):
+def _load_local_service_definition(service_name: str) -> dict[str, Any] | None:
+    """Load scaffolded service intent from local docker-compose.yml."""
+    compose_path = Path("docker-compose.yml")
+    if not compose_path.exists():
         return None
-    remote_value = remote_metadata.get(field)
-    if isinstance(remote_value, str) and remote_value.strip():
-        return remote_value
-    return None
+    try:
+        compose_text = compose_path.read_text()
+    except Exception:
+        return None
+
+    lines = compose_text.splitlines()
+    service_block = _extract_service_block(lines, service_name)
+    if service_block is None:
+        return None
+
+    image = _extract_image(service_block)
+    port = _extract_port(service_block)
+    domain = _extract_caddy_domain(service_block)
+    path_prefix = _extract_path_prefix(service_block)
+    ingress_networks = _extract_networks(service_block)
+    exposure_scope = _extract_deploy_scope(service_block)
+    internal = exposure_scope == "internal" or (domain is None and not ingress_networks)
+
+    return {
+        "image": image,
+        "port": port,
+        "domain": domain,
+        "path_prefix": path_prefix,
+        "ingress_networks": ingress_networks,
+        "global_ingress": exposure_scope == "global",
+        "internal": internal,
+    }
 
 
 def _default_service_image_name(service_name: str) -> str:
@@ -459,44 +394,123 @@ def _default_service_image_name(service_name: str) -> str:
     return f"{normalized}:latest"
 
 
-def _resolve_service_domain_with_source(
-    domain: str | None,
-    service_name: str,
-    svc_mgr: ServiceManager,
-) -> tuple[str | None, str | None]:
-    """Resolve service domain and return both value and source label."""
-    if domain:
-        return domain, "cli"
+def _extract_service_block(lines: list[str], service_name: str) -> list[str] | None:
+    """Return a service block by name, falling back to the first service entry."""
+    in_services = False
+    block_start = None
+    fallback_start = None
 
-    local_metadata = _load_local_service_metadata()
-    local_value = local_metadata.get("domain")
-    if isinstance(local_value, str) and local_value.strip():
-        return local_value.strip(), "local-metadata"
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "services:":
+            in_services = True
+            continue
+        if not in_services:
+            continue
 
-    remote_metadata = svc_mgr.read_service_metadata(service_name)
-    if isinstance(remote_metadata, dict):
-        remote_value = remote_metadata.get("domain")
-        if isinstance(remote_value, str) and remote_value.strip():
-            return remote_value.strip(), "remote-metadata"
-    return None, None
+        if line and not line.startswith(" ") and stripped:
+            break
+
+        match = re.match(r"^\s{2}([A-Za-z0-9_.-]+):\s*$", line)
+        if not match:
+            continue
+
+        if fallback_start is None:
+            fallback_start = idx
+        if match.group(1) == service_name:
+            block_start = idx
+            break
+
+    if block_start is None:
+        block_start = fallback_start
+    if block_start is None:
+        return None
+
+    block_end = len(lines)
+    for idx in range(block_start + 1, len(lines)):
+        line = lines[idx]
+        if re.match(r"^\s{2}[A-Za-z0-9_.-]+:\s*$", line):
+            block_end = idx
+            break
+        if line and not line.startswith(" "):
+            block_end = idx
+            break
+
+    return lines[block_start:block_end]
 
 
-def _resolve_service_image(image: str | None, service_name: str, svc_mgr: ServiceManager) -> str | None:
-    """Resolve service image from CLI, metadata, or deployed service state."""
-    if image:
-        return image
+def _extract_image(service_block: list[str]) -> str | None:
+    for line in service_block:
+        match = re.match(r"^\s{4}image:\s*(.+?)\s*$", line)
+        if match:
+            return match.group(1).strip().strip("\"'")
+    return None
 
-    resolved_image = _resolve_service_metadata_field("image", service_name, svc_mgr)
-    if resolved_image:
-        return resolved_image
 
-    deployed_image_getter = getattr(svc_mgr, "get_deployed_image", None)
-    if callable(deployed_image_getter):
-        deployed_image = deployed_image_getter(service_name)
-        if deployed_image:
-            return deployed_image
+def _extract_port(service_block: list[str]) -> int:
+    in_expose = False
+    for line in service_block:
+        if re.match(r"^\s{4}expose:\s*$", line):
+            in_expose = True
+            continue
+        if in_expose and re.match(r"^\s{6}-\s*", line):
+            value = line.split("-", 1)[1].strip().strip("\"'")
+            try:
+                return int(value)
+            except ValueError:
+                return 8000
+        if in_expose and re.match(r"^\s{4}[A-Za-z0-9_.-]+:\s*$", line):
+            break
+    return 8000
 
-    return _default_service_image_name(service_name)
+
+def _extract_caddy_domain(service_block: list[str]) -> str | None:
+    for line in service_block:
+        match = re.match(r"^\s{6}caddy:\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        value = match.group(1).strip().strip("\"'")
+        value = value.removeprefix("http://").removeprefix("https://")
+        return value
+    return None
+
+
+def _extract_path_prefix(service_block: list[str]) -> str | None:
+    for line in service_block:
+        match = re.match(r"^\s{6}caddy\.handle_path:\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        raw = match.group(1).strip().strip("\"'")
+        normalized = raw.rstrip("*").rstrip("/")
+        if not normalized:
+            return "/"
+        return normalized
+    return None
+
+
+def _extract_networks(service_block: list[str]) -> tuple[str, ...]:
+    in_networks = False
+    networks: list[str] = []
+    for line in service_block:
+        if re.match(r"^\s{4}networks:\s*$", line):
+            in_networks = True
+            continue
+        if in_networks and re.match(r"^\s{6}-\s*", line):
+            value = line.split("-", 1)[1].strip().strip("\"'")
+            if value:
+                networks.append(value)
+            continue
+        if in_networks and re.match(r"^\s{4}[A-Za-z0-9_.-]+:\s*$", line):
+            break
+    return tuple(networks)
+
+
+def _extract_deploy_scope(service_block: list[str]) -> str:
+    for line in service_block:
+        match = re.match(r"^\s{6}deploy\.scope:\s*(.+?)\s*$", line)
+        if match:
+            return match.group(1).strip().strip("\"'")
+    return "single"
 
 
 def _resolve_service_deploy_path(

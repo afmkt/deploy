@@ -562,31 +562,13 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
 
 @service.command(name="deploy")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
-@click.option("--image", "-i",
-              help="Docker image name/tag to run or build on target (optional if resolvable from metadata/state)")
-@click.option("--domain", "-d",
-              help="Public domain / hostname")
-@click.option("--port", type=int, default=8000,
-              help="App port inside the container")
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
 @click.option("--rebuild", is_flag=True, default=False,
               help="Force a rebuild of the image from the remote build context even if the image already exists on target")
-@click.option("--allow-remote-domain-fallback", is_flag=True, default=False,
-              help="Allow reusing domain from persisted target metadata when --domain is not provided")
 @click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
               help="Action when image is missing on target")
 @click.option("--auto-sync-context/--no-auto-sync-context", default=True,
               help="Automatically sync repository context on target before remote build when needed")
-@click.option("--ingress-network", "ingress_networks", multiple=True,
-              help="External Docker network used for ingress routing (repeat flag or use comma-separated values)")
-@click.option("--global-ingress/--no-global-ingress", default=False,
-              help="Attach the service to every configured ingress network instead of just one")
-@click.option("--path-prefix", default=None,
-              help="Route only traffic under this path prefix on the shared domain (e.g. /api/auth). "
-                   "Allows multiple services to share one domain via path-based routing.")
-@click.option("--internal", is_flag=True, default=False,
-              help="Mark this service as internal-only: no caddy labels, no ingress network. "
-                   "The container is reachable only by other containers on the same Docker network.")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -596,11 +578,11 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
               help="Load SSH args from saved config")
 @click.option("--interactive/--no-interactive", default=True,
               help="Interactive mode")
-def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote_domain_fallback, missing_image_action, auto_sync_context,
-                   ingress_networks, global_ingress, path_prefix, internal, host, ssh_port, username, key,
-                   password, use_config, interactive):
+def service_deploy(name, deploy_path, rebuild, missing_image_action, auto_sync_context,
+                   host, ssh_port, username, key, password, use_config, interactive):
     """Deploy a service image to the deployment target and register with ingress.
 
+    Reads scaffolded routing/build intent from local docker-compose.yml.
     When the image does not exist on target, the command can push or build it.
     """
     config = DeployConfig()
@@ -608,18 +590,10 @@ def service_deploy(name, image, domain, port, deploy_path, rebuild, allow_remote
     resolution = resolver.resolve(
         config,
         name=name,
-        image=image,
-        domain=domain,
-        port=port,
         deploy_path=deploy_path,
         rebuild=rebuild,
-        allow_remote_domain_fallback=allow_remote_domain_fallback,
         missing_image_action=missing_image_action,
         auto_sync_context=auto_sync_context,
-        ingress_networks=ingress_networks,
-        global_ingress=global_ingress,
-        path_prefix=path_prefix,
-        internal=internal,
         profile=ConnectionProfile(
             host=host,
             port=ssh_port,

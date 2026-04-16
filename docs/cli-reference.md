@@ -288,7 +288,7 @@ Arguments:
 
 Operation:
 
-- Resolves routing/domain and image source
+- Loads service routing/build intent from local docker-compose.yml
 - Ensures proxy is running
 - Uses existing image, pushes image, or builds remotely
 - Uploads compose and metadata
@@ -298,18 +298,10 @@ Operation:
 Arguments:
 
 - --name, -n
-- --image, -i
-- --domain, -d
-- --port (default: 8000)
 - --deploy-path
 - --rebuild
-- --allow-remote-domain-fallback
 - --missing-image-action (ask|push|build|abort, default: ask)
 - --auto-sync-context/--no-auto-sync-context (default: auto-sync-context)
-- --ingress-network (repeatable)
-- --global-ingress/--no-global-ingress (default: no-global-ingress)
-- --path-prefix
-- --internal
 - --host, -h
 - --ssh-port (default: 22)
 - --username, -u

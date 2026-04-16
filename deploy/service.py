@@ -258,14 +258,37 @@ def render_service_skill(
 
         1. Scaffold or refresh files:
            `deploy service init -n {service_name} -d {domain}`
+           This creates `Dockerfile`, `docker-compose.yml`, and this skill file.
+           The compose file contains all routing and service configuration.
+
         2. Sync source to target when needed:
            `deploy push`
+           Copies the local repository to the target machine.
+
         3. Ensure ingress proxy is running:
            `deploy proxy up`
+           Starts the Caddy reverse proxy that routes traffic to services.
+
         4. Deploy service:
-           `deploy service deploy -n {service_name} -d {domain} -i {image_value}`
+           `deploy service deploy -n {service_name}`
+           Reads configuration from local `docker-compose.yml` and deploys to target.
+           No need to pass `-d`, `-i`, `--port`, etc. — those are set via `service init`.
+
         5. Check runtime state:
            `deploy service status -n {service_name}`
+           Shows container status, IP, and routed domain.
+
+        ## Configuration Source
+
+        **All service configuration is now sourced from `docker-compose.yml`:**
+        - Domain/routing: `caddy` label
+        - Container port: `expose` section
+        - Service image: `image` field
+        - Path prefix: `caddy.handle_path` label
+        - Ingress networks: `networks` section
+        - Exposure scope: `deploy.scope` label (`internal`, `single`, or `global`)
+
+        Update `docker-compose.yml` directly or re-run `service init` with new flags to change routing.
 
         ## Execution Contract
 
@@ -278,6 +301,7 @@ def render_service_skill(
         ## Operational Guidance
 
         - Prefer metadata-driven deploys by keeping `.deploy-service.json` accurate.
+        - Update routing by editing `docker-compose.yml` or re-running `service init`.
         - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
         - Use `deploy service down -n {service_name}` to stop without deleting metadata.
         - For local development, set `--host localhost` to run workflows locally.

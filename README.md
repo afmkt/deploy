@@ -243,48 +243,39 @@ This generates:
 
 ### Deploy Service to Target
 
-`--domain` is required on every deploy. The command will not silently reuse a
-stale domain from a previous deployment.
+`service deploy` now reads routing/build intent from local `docker-compose.yml`
+(scaffolded by `service init`) and uses those values for deployment.
 
 ```sh
-deploy service deploy -i <image:tag> -d api.example.com --host <host> --username <user> --key <ssh_key>
+deploy service deploy --host <host> --username <user> --key <ssh_key>
 ```
 
 Local target:
 
 ```sh
-deploy service deploy -i <image:tag> -d localhost --host localhost
+deploy service deploy --host localhost
 ```
 
 Useful options:
 
-- `--domain / -d <host>`: Public hostname for caddy routing. **Always provide this explicitly.**
 - `--rebuild`: Force a fresh Docker image build from the remote build context even if the image already exists on the target.
-- `--allow-remote-domain-fallback`: Opt in to reusing the domain persisted on the target when `--domain` is omitted. Not recommended; prefer always providing `--domain`.
-- `--ingress-network <name>`: Use the same network name configured in `proxy up`.
-- `--global-ingress`: Attach the service to every ingress network currently configured on the proxy. When `proxy up` later changes its ingress networks, globally exposed services are re-applied automatically.
-- `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain. The prefix is stripped before the request reaches the upstream container.
-- `--internal`: No Caddy labels, no ingress network. `--domain` is not required.
+- `--missing-image-action {ask|push|build|abort}`: Behavior when the compose image is missing on target.
+- `--deploy-path`: Remote repo base used for remote build context (`deploy push` path).
+- `--auto-sync-context/--no-auto-sync-context`: Automatically sync git context before remote build when needed.
 - `--host localhost`: Deploy to the current machine instead of a remote host.
 
-#### Domain Resolution Order
+Notes:
 
-When `--domain` is omitted, the command resolves the domain in this order:
-
-1. Local `.deploy-service.json` in the current directory (written by `service init`)
-2. Persisted service metadata on the target host
-
-If the domain can only be resolved from the target's persisted metadata (source 2),
-the command warns and **exits with an error** in non-interactive mode unless
-`--allow-remote-domain-fallback` is also passed. This prevents silently reusing
-stale routing from a previous deployment.
+- `docker-compose.yml` is required for `service deploy`.
+- For non-internal services, `docker-compose.yml` must include a `caddy:` label.
+- If compose uses `build: .` and no explicit `image:`, deploy defaults to `<service-name>:latest` for target-side image checks/builds.
 
 #### Rebuild an Updated Service
 
 After changing source code or dependencies, rebuild and redeploy:
 
 ```sh
-deploy service deploy -d api.example.com --rebuild
+deploy service deploy --rebuild
 ```
 
 This builds a fresh image from the remote build context and restarts the container.
@@ -310,17 +301,15 @@ In-network access: http://<service-name>:8000/<path>
 Example with isolated app network:
 
 ```sh
-deploy service deploy -i <image:tag> -d api.example.com \
-    --ingress-network app-a \
-    --host <host> --username <user> --key <ssh_key>
+deploy service init -d api.example.com --ingress-network app-a
+deploy service deploy --host <host> --username <user> --key <ssh_key>
 ```
 
 Example with a globally exposed service:
 
 ```sh
-deploy service deploy -i <image:tag> -d api.example.com \
-    --global-ingress \
-    --host <host> --username <user> --key <ssh_key>
+deploy service init -d api.example.com --global-ingress
+deploy service deploy --host <host> --username <user> --key <ssh_key>
 ```
 
 ### Path-Based Routing — Multiple Services on One Domain
@@ -331,13 +320,12 @@ prefixed services only handle requests under their path.
 
 ```sh
 # Auth UI — owns the domain root
-deploy service deploy -d auth.example.com --name auth-ui -i auth-ui:latest \
-    --host <host> --username <user> --key <ssh_key>
+deploy service init -d auth.example.com --name auth-ui
+deploy service deploy --name auth-ui --host <host> --username <user> --key <ssh_key>
 
 # Auth API — owns /api/auth/* only; prefix is stripped before forwarding
-deploy service deploy -d auth.example.com --name auth-api -i auth-api:latest \
-    --path-prefix /api/auth \
-    --host <host> --username <user> --key <ssh_key>
+deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy service deploy --name auth-api --host <host> --username <user> --key <ssh_key>
 ```
 
 Both containers must join the same ingress network. Caddy merges them into one
@@ -347,12 +335,12 @@ upstream, so the service sees `/login` for an incoming `/api/auth/login` request
 ### Internal Services — No Public Routing
 
 For caches, databases, background workers, and other containers that must not be
-exposed to the internet, use `--internal`. No Caddy labels or ingress network
+exposed to the internet, use `--internal` during `service init`. No Caddy labels or ingress network
 membership are added.
 
 ```sh
-deploy service deploy --name session-store --internal -i redis:alpine \
-    --host <host> --username <user> --key <ssh_key>
+deploy service init --name session-store --internal
+deploy service deploy --name session-store --host <host> --username <user> --key <ssh_key>
 ```
 
 `--domain` is optional for internal services. The container is reachable by name
@@ -360,13 +348,21 @@ from other containers on the same Docker Compose project network.
 
 Recommended shared-host pattern:
 
-1. Start proxy once with all application networks.
-2. Deploy each application service with its own `--ingress-network` and explicit `--domain`.
+1. Scaffold each service with its own `--ingress-network` and explicit `--domain`.
+2. Start proxy once with all application networks.
+3. Deploy each service.
 
 ```sh
+# Set up services with their network and domain
+deploy service init -n app-a -d a.example.com --ingress-network app-a -i <image:a>
+deploy service init -n app-b -d b.example.com --ingress-network app-b -i <image:b>
+
+# Start shared proxy
 deploy proxy up --use-config --ingress-network app-a --ingress-network app-b
-deploy service deploy -n app-a -i <image:a> -d a.example.com --ingress-network app-a --host <host> --username <user> --key <ssh_key>
-deploy service deploy -n app-b -i <image:b> -d b.example.com --ingress-network app-b --host <host> --username <user> --key <ssh_key>
+
+# Deploy services (configuration comes from docker-compose.yml)
+deploy service deploy -n app-a --host <host> --username <user> --key <ssh_key>
+deploy service deploy -n app-b --host <host> --username <user> --key <ssh_key>
 ```
 
 ### Check Service Status
@@ -387,10 +383,11 @@ Output includes:
 
 A mismatch between route host and metadata domain means the running container is
 routing for a different hostname than the current metadata records. Fix it by
-redeploying with an explicit `--domain`:
+re-running `service init` with the correct domain and then deploying:
 
 ```sh
-deploy service deploy --name <service> --domain <correct-host>
+deploy service init --name <service> -d <correct-host>
+deploy service deploy --name <service> --host <host> --username <user> --key <ssh_key>
 ```
 
 ## Monitor TUI

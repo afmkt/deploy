@@ -7,6 +7,15 @@ from main import proxy
 from main import service
 import main as main_module
 
+
+def _write_service_compose(image: str = "repo/app:latest") -> None:
+    Path("docker-compose.yml").write_text(
+        """version: \"3.8\"\n\nservices:\n  myapp:\n    image: """
+        + image
+        + """\n    container_name: myapp\n    expose:\n      - \"8000\"\n    networks:\n      - ingress\n    labels:\n      caddy: app.example.com\n      caddy.reverse_proxy: \"{{upstreams 8000}}\"\n      deploy.scope: single\n    restart: unless-stopped\n\nnetworks:\n  ingress:\n    external: true\n    name: ingress\n"""
+    )
+
+
 def test_main_help():
     runner = CliRunner()
     result = runner.invoke(main, ['--help'])
@@ -309,8 +318,6 @@ def test_service_deploy_persists_args_only_after_success(monkeypatch):
         "--username", "tester",
         "--no-use-config",
         "--no-interactive",
-        "--domain", "example.com",
-        "--image", "myapp:latest",
     ])
 
     assert result.exit_code == 0
@@ -363,8 +370,6 @@ def test_service_deploy_does_not_persist_when_execution_fails(monkeypatch):
         "--username", "tester",
         "--no-use-config",
         "--no-interactive",
-        "--domain", "example.com",
-        "--image", "myapp:latest",
     ])
 
     assert result.exit_code == 1
@@ -519,12 +524,14 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
-    result = runner.invoke(service, [
-        "deploy",
-        "--host", "localhost", "--image", "repo/app:latest",
-        "--domain", "app.example.com",
-        "--no-use-config",
-    ])
+    with runner.isolated_filesystem():
+        _write_service_compose("repo/app:latest")
+
+        result = runner.invoke(service, [
+            "deploy",
+            "--host", "localhost",
+            "--no-use-config",
+        ])
 
     assert result.exit_code == 0
     assert nested["command"] is main_module.docker_push
@@ -623,13 +630,15 @@ def test_service_deploy_remote_build_on_missing_image(monkeypatch):
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
-    result = runner.invoke(service, [
-        "deploy",
-        "--host", "localhost", "--image", "repo/app:latest",
-        "--domain", "app.example.com",
-        "--deploy-path", "/tmp/deploy/repos",
-        "--no-use-config",
-    ])
+    with runner.isolated_filesystem():
+        _write_service_compose("repo/app:latest")
+
+        result = runner.invoke(service, [
+            "deploy",
+            "--host", "localhost",
+            "--deploy-path", "/tmp/deploy/repos",
+            "--no-use-config",
+        ])
 
     assert result.exit_code == 0
     assert "build_image_from_context" in calls
@@ -676,18 +685,21 @@ def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(mon
         def image_exists_remote(self, image):
             return False
 
-    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *args, **kwargs: FakeConnection())
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *args, **kwargs: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
-    result = runner.invoke(service, [
-        "deploy",
-        "--host", "localhost", "--domain", "app.example.com",
-        "--no-use-config",
-        "--no-interactive",
-    ])
+    with runner.isolated_filesystem():
+        _write_service_compose("repo/app:latest")
+
+        result = runner.invoke(service, [
+            "deploy",
+            "--host", "localhost",
+            "--no-use-config",
+            "--no-interactive",
+        ])
 
     assert result.exit_code == 1
     assert "Deploy path is required for remote build context in non-interactive mode" in result.output
@@ -729,20 +741,22 @@ def test_service_deploy_non_interactive_build_requires_deploy_path(monkeypatch):
         def read_service_metadata(self, service_name):
             return None
 
-    monkeypatch.setattr(main_module, "_build_connection_from_config", lambda *args, **kwargs: FakeConnection())
-    monkeypatch.setattr(main_module, "ProxyManager", FakeProxyManager)
-    monkeypatch.setattr(main_module, "ServiceManager", FakeServiceManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *args, **kwargs: FakeConnection())
+    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
+    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
-    result = runner.invoke(service, [
-        "deploy",
-        "--host", "localhost", "--image", "repo/app:latest",
-        "--domain", "app.example.com",
-        "--no-use-config",
-        "--no-interactive",
-        "--missing-image-action", "build",
-    ])
+    with runner.isolated_filesystem():
+        _write_service_compose("repo/app:latest")
+
+        result = runner.invoke(service, [
+            "deploy",
+            "--host", "localhost",
+            "--no-use-config",
+            "--no-interactive",
+            "--missing-image-action", "build",
+        ])
 
     assert result.exit_code == 1
     assert "Deploy path is required for remote build context in non-interactive mode" in result.output
@@ -1212,7 +1226,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
     assert "http://localhost/healthz" in result.output
 
 
-def test_service_deploy_refuses_remote_domain_fallback_non_interactive(monkeypatch, tmp_path):
+def test_service_deploy_requires_local_compose_non_interactive(monkeypatch, tmp_path):
     runner = CliRunner()
 
     class FakeConnection:
@@ -1235,39 +1249,9 @@ def test_service_deploy_refuses_remote_domain_fallback_non_interactive(monkeypat
         def is_running(self):
             return True
 
-        def get_configured_ingress_networks(self):
-            return ["ingress"]
-
     class FakeServiceManager:
         def __init__(self, ssh):
             pass
-
-        def read_service_metadata(self, service_name):
-            return {"domain": "x.com", "image": "repo/app:latest"}
-
-        def get_routed_host(self, service_name):
-            return "x.com"
-
-        def image_exists_remote(self, image):
-            return True
-
-        def ensure_service_dir(self, service_name):
-            return True
-
-        def upload_compose(self, service_name, compose_content):
-            return True
-
-        def upload_metadata(self, service_name, metadata_content):
-            return True
-
-        def compose_up(self, service_name):
-            return True
-
-        def get_status(self, service_name):
-            return "running"
-
-        def get_container_ip(self, service_name):
-            return None
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
@@ -1283,12 +1267,10 @@ def test_service_deploy_refuses_remote_domain_fallback_non_interactive(monkeypat
     ])
 
     assert result.exit_code == 1, result.output
-    assert "Current routed host: x.com" in result.output
-    assert "Domain resolved from persisted target metadata" in result.output
-    assert "Refusing remote metadata domain fallback in non-interactive mode" in result.output
+    assert "docker-compose.yml is required" in result.output
 
 
-def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp_path):
+def test_service_deploy_uses_local_compose_for_routing(monkeypatch, tmp_path):
     runner = CliRunner()
 
     class FakeConnection:
@@ -1318,9 +1300,6 @@ def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp
         def __init__(self, ssh):
             pass
 
-        def read_service_metadata(self, service_name):
-            return {"domain": "x.com", "image": "repo/app:latest"}
-
         def get_routed_host(self, service_name):
             return "x.com"
 
@@ -1346,6 +1325,7 @@ def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp
             return None
 
     monkeypatch.chdir(tmp_path)
+    _write_service_compose("repo/app:latest")
     monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
     monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
     monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
@@ -1356,12 +1336,11 @@ def test_service_deploy_allows_remote_domain_fallback_with_flag(monkeypatch, tmp
         "deploy",
         "--host", "localhost", "--no-use-config",
         "--no-interactive",
-        "--allow-remote-domain-fallback",
     ])
 
     assert result.exit_code == 0, result.output
     assert "Current routed host: x.com" in result.output
-    assert "Domain resolved from persisted target metadata" in result.output
+    assert "Domain : app.example.com" in result.output
 
 
 def test_service_status_shows_logs(monkeypatch):

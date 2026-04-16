@@ -134,12 +134,12 @@ deploy proxy up
 ### Step 4 — Deploy the service
 
 ```sh
-deploy service deploy -d api.example.com -i myapp:latest
+deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
-`service deploy` checks that the proxy is running, resolves or builds the image,
-uploads the compose file, and starts the container. On success it prints the
-routing information:
+`service deploy` checks that the proxy is running, resolves/builds the image from
+local `docker-compose.yml` intent, uploads the compose file, and starts the
+container. On success it prints the routing information:
 
 ```
 Route host: api.example.com
@@ -162,7 +162,7 @@ deploy push
 **Rebuild image and restart:**
 
 ```sh
-deploy service deploy -d api.example.com --rebuild
+deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519 --rebuild
 ```
 
 `--rebuild` forces a fresh `docker build` from the remote source tree even if an
@@ -195,7 +195,8 @@ via SFTP.
 **Deploy using the transferred image:**
 
 ```sh
-deploy service deploy -d api.example.com -i myapp:1.2.3
+deploy service init -d api.example.com -i myapp:1.2.3
+deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 Because the image is already present, `service deploy` skips the build/push
@@ -224,11 +225,11 @@ deploy proxy up --ingress-network app-a,app-b
 **Deploy each service on its own network:**
 
 ```sh
-# From the app-a repository
-deploy service deploy -i app-a:latest -d a.example.com --ingress-network app-a
+# From the app-a repository (scaffolded with --ingress-network app-a -i app-a:latest)
+deploy service deploy
 
-# From the app-b repository
-deploy service deploy -i app-b:latest -d b.example.com --ingress-network app-b
+# From the app-b repository (scaffolded with --ingress-network app-b -i app-b:latest)
+deploy service deploy
 ```
 
 Services on different networks cannot reach each other directly. The proxy
@@ -237,10 +238,11 @@ routes external traffic to each service via its dedicated network.
 ### Globally exposed services
 
 A service that must be reachable regardless of how the proxy's network list
-changes can be marked global:
+changes can be marked global during `service init`:
 
 ```sh
-deploy service deploy -i shared:latest -d shared.example.com --global-ingress
+deploy service init -i shared:latest -d shared.example.com --global-ingress
+deploy service deploy
 ```
 
 When `proxy up` is later run with a different set of networks, globally exposed
@@ -264,7 +266,7 @@ the prefix before forwarding, so the upstream service sees a clean path.
 ```sh
 # Inside the auth-ui repository
 deploy service init -d auth.example.com --name auth-ui
-deploy service deploy -d auth.example.com --name auth-ui -i auth-ui:latest
+deploy service deploy --name auth-ui
 ```
 
 **Scaffold and deploy the API** (serves only `/api/auth/*`):
@@ -272,11 +274,7 @@ deploy service deploy -d auth.example.com --name auth-ui -i auth-ui:latest
 ```sh
 # Inside the auth-api repository
 deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
-deploy service deploy \
-  -d auth.example.com \
-  --name auth-api \
-  --path-prefix /api/auth \
-  -i auth-api:latest
+deploy service deploy --name auth-api
 ```
 
 The proxy merges both containers into a single virtual host.  Requests to
@@ -320,14 +318,14 @@ supplied value are normalised before the label is written.
 Some services (caches, databases, background workers, sidecars) must be
 reachable by other containers but must not be exposed to the internet.
 
-Pass `--internal` to suppress all Caddy labels and ingress network membership.
+Pass `--internal` to `service init` to suppress all Caddy labels and ingress network membership.
 The container joins only the default project network created by Docker Compose,
 so it is reachable by name from other containers in the same compose project or
 from containers explicitly added to the same network.
 
 ```sh
 deploy service init --name session-store --internal
-deploy service deploy --name session-store --internal -i redis:alpine
+deploy service deploy --name session-store
 ```
 
 `--domain` is not required for internal services.  If omitted, the service name
@@ -370,7 +368,8 @@ deploy proxy up --host localhost
 **Deploy a service locally:**
 
 ```sh
-deploy service deploy -d localhost -i myapp:dev --host localhost
+deploy service init -d localhost -n myapp
+deploy service deploy --host localhost
 ```
 
 The `localhost` domain tells Caddy to use plain HTTP (no TLS certificate

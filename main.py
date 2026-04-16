@@ -831,7 +831,7 @@ cli.add_command(show_config, name="show-config")
 cli.add_command(clear_config, name="clear-config")
 cli.add_command(docker_push, name="docker-push")
 cli.add_command(proxy, name="proxy")
-cli.add_command(service, name="service")
+cli.add_command(svc, name="svc")
 cli.add_command(monitor)
 
 

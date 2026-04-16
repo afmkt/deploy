@@ -267,12 +267,20 @@ def render_service_skill(
         5. Check runtime state:
            `deploy service status -n {service_name}`
 
+        ## Execution Contract
+
+        Keep argument resolution and workflow execution orthogonal:
+
+        1. Resolve: finalize defaults/config/session values into resolved intent before execution.
+        2. Execute: run workflow steps only from resolved intent; avoid re-resolving raw inputs.
+        3. Persist on success: write config/session updates only after successful execution.
+
         ## Operational Guidance
 
         - Prefer metadata-driven deploys by keeping `.deploy-service.json` accurate.
         - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
         - Use `deploy service down -n {service_name}` to stop without deleting metadata.
-        - For local development, set `--host localhost` on deploy commands.
+        - For local development, set `--host localhost` to run workflows locally.
         """
     )
 

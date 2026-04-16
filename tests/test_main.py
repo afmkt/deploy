@@ -390,6 +390,57 @@ def test_service_init_writes_service_skill_file():
         skill_content = skill_path.read_text()
         assert "Service Deployment Skill: api" in skill_content
         assert "Domain/host: api.example.com" in skill_content
+        assert "## Execution Contract" in skill_content
+        assert "Persist on success" in skill_content
+
+
+def test_service_init_delegates_to_flow(monkeypatch):
+    runner = CliRunner()
+    called = {}
+
+    class FakeResolver:
+        def resolve(self, **kwargs):
+            called["resolved"] = kwargs
+            return SimpleNamespace(context=SimpleNamespace(service_name="api"))
+
+    def fake_execute(context, console):
+        called["executed_service"] = context.service_name
+        return True
+
+    monkeypatch.setattr(main_module, "ServiceInitArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_service_init", fake_execute)
+
+    result = runner.invoke(service, [
+        "init",
+        "--domain", "api.example.com",
+        "--name", "api",
+        "--port", "8000",
+    ])
+
+    assert result.exit_code == 0
+    assert called["resolved"]["domain"] == "api.example.com"
+    assert called["executed_service"] == "api"
+
+
+def test_service_init_exits_when_execution_fails(monkeypatch):
+    runner = CliRunner()
+
+    class FakeResolver:
+        def resolve(self, **kwargs):
+            return SimpleNamespace(context=SimpleNamespace(service_name="api"))
+
+    def fake_execute(context, console):
+        return False
+
+    monkeypatch.setattr(main_module, "ServiceInitArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_service_init", fake_execute)
+
+    result = runner.invoke(service, [
+        "init",
+        "--domain", "api.example.com",
+    ])
+
+    assert result.exit_code == 1
 
 
 def test_service_deploy_local_auto_push_stays_local(monkeypatch):

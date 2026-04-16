@@ -14,7 +14,7 @@ This repository is prepared for open-source use as a binary CLI tool.
 ## Current Status
 
 - Git push/pull workflows are stable.
-- Core operational commands support local and remote targets via `--target`.
+- Core operational commands derive local vs remote behavior from connection profile (`--host localhost` for local runs).
 - Docker image transfer (`docker-push`) supports remote architecture targeting.
 - `proxy` command group manages `lucaslorentz/caddy-docker-proxy`.
 - Native Caddy bootstrap and port handoff is supported.
@@ -95,7 +95,7 @@ deploy push --use-config
 Run the same workflow on the local machine:
 
 ```sh
-deploy push --target local --deploy-path /tmp/deploy/repos
+deploy push --host localhost --deploy-path /tmp/deploy/repos
 ```
 
 ### 2) Git Pull from Remote
@@ -107,7 +107,7 @@ deploy pull --host <host> --username <user> --key <ssh_key> --deploy-path /tmp/d
 Local target example:
 
 ```sh
-deploy pull --target local --deploy-path /tmp/deploy/repos
+deploy pull --host localhost --deploy-path /tmp/deploy/repos
 ```
 
 Useful options:
@@ -138,7 +138,7 @@ deploy docker-push -i <image:tag> --host <host> --username <user> --key <ssh_key
 Local target example:
 
 ```sh
-deploy docker-push -i <image:tag> --target local
+deploy docker-push -i <image:tag> --host localhost
 ```
 
 Notes:
@@ -167,7 +167,7 @@ deploy proxy down --use-config
 Useful options:
 
 - `--ingress-network <name>`: Attach proxy to one or more external networks. Repeat the option or use comma-separated values.
-- `--target local`: Run the proxy workflow on the current machine instead of over SSH.
+- `--host localhost`: Run the same proxy workflow on the current machine instead of over SSH.
 
 Examples:
 
@@ -239,6 +239,7 @@ This generates:
 - `Dockerfile`
 - `docker-compose.yml`
 - `.deploy-service.json` — local service metadata (domain, port, image, networks)
+- `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance
 
 ### Deploy Service to Target
 
@@ -252,7 +253,7 @@ deploy service deploy -i <image:tag> -d api.example.com --host <host> --username
 Local target:
 
 ```sh
-deploy service deploy -i <image:tag> -d localhost --target local
+deploy service deploy -i <image:tag> -d localhost --host localhost
 ```
 
 Useful options:
@@ -264,7 +265,7 @@ Useful options:
 - `--global-ingress`: Attach the service to every ingress network currently configured on the proxy. When `proxy up` later changes its ingress networks, globally exposed services are re-applied automatically.
 - `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain. The prefix is stripped before the request reaches the upstream container.
 - `--internal`: No Caddy labels, no ingress network. `--domain` is not required.
-- `--target local`: Deploy to the current machine instead of a remote host.
+- `--host localhost`: Deploy to the current machine instead of a remote host.
 
 #### Domain Resolution Order
 
@@ -472,7 +473,6 @@ Sync a local Git repository to the deployment target.
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password (not recommended) |
 | `--deploy-path` | `-d` | `/tmp/deploy/repos` | Deploy path on target |
-| `--target` | | `auto` | `auto` \| `remote` \| `local` |
 | `--use-config` | | off | Load arguments from saved config |
 | `--dry-run` | | off | Validate connection without pushing |
 | `--interactive/--no-interactive` | | on | Interactive mode |
@@ -495,7 +495,6 @@ Pull a deployed repository back to local.
 | `--branch` | `-b` | | Branch to pull into |
 | `--commit` | | off | Commit remote working tree changes before pulling |
 | `--sync-remote` | | off | Full sync: commit remote → push to bare → pull locally |
-| `--target` | | `auto` | `auto` \| `remote` \| `local` |
 | `--use-config` | | off | Load arguments from saved config |
 | `--dry-run` | | off | Validate connection without pulling |
 
@@ -516,7 +515,6 @@ Transfer a Docker image to the deployment target.
 | `--platform` | | *(auto-detect)* | Override target platform (e.g. `linux/amd64`) |
 | `--registry-username` | | | Docker registry username for private images |
 | `--registry-password` | | | Docker registry password for private images |
-| `--target` | | `auto` | `auto` \| `remote` \| `local` |
 | `--use-config` | | off | Load arguments from saved config |
 | `--dry-run` | | off | Detect architecture without transferring |
 
@@ -526,7 +524,7 @@ Transfer a Docker image to the deployment target.
 
 Manage the `caddy-docker-proxy` ingress container.
 
-All subcommands accept the shared connection options: `--host`, `--port`, `--username`, `--key`, `--password`, `--target`, `--use-config`.
+All subcommands accept the shared connection options: `--host`, `--port`, `--username`, `--key`, `--password`, `--use-config`.
 
 #### Subcommands
 
@@ -594,7 +592,6 @@ Build or push a service image and start it on the target.
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
-| `--target` | | `auto` | `auto` \| `remote` \| `local` |
 | `--use-config` | | on | Load SSH args from saved config |
 | `--interactive/--no-interactive` | | on | Interactive mode |
 
@@ -610,7 +607,6 @@ Show routing, access URLs, and recent container logs.
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
-| `--target` | | `auto` | `auto` \| `remote` \| `local` |
 | `--use-config` | | on | Load SSH args from saved config |
 
 ---
@@ -621,7 +617,7 @@ Run the TUI monitor for proxy, services, networks, and resources.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--host`, `--port`, `--username`, `--key`, `--password`, `--target`, `--use-config` | | Connection options (see above) |
+| `--host`, `--port`, `--username`, `--key`, `--password`, `--use-config` | | Connection options (see above) |
 | `--refresh-interval` | `5` | Polling interval in seconds |
 | `--log-lines` | `120` | Lines to fetch per logs action |
 | `--command-timeout` | `10` | Per-command SSH timeout in seconds |

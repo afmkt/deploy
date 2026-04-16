@@ -45,14 +45,8 @@ from deploy.target import (
 from deploy.proxy import ProxyManager
 from deploy.ingress import INGRESS_NETWORK, normalize_ingress_networks
 from deploy.paths import REPOS_DIR
-from deploy.service import (
-    ServiceManager,
-    detect_fastapi_entrypoint,
-    render_dockerfile,
-    render_service_metadata,
-    render_service_compose,
-    write_service_skill,
-)
+from deploy.service import ServiceManager
+from deploy.service_init_flow import ServiceInitArgumentResolver, execute_service_init
 from deploy.config import DeployConfig
 from deploy import __version__
 
@@ -547,91 +541,23 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
 
     Run inside the project directory.  Detects FastAPI entrypoint automatically.
     """
-    project_dir = Path(".")
-
-    # Derive service name from directory if not given
-    service_name = name or project_dir.resolve().name
-
-    if not domain and not internal:
-        raise click.UsageError("--domain is required unless --internal is set")
-    if not domain:
-        domain = service_name
-
-    # Detect FastAPI entrypoint
-    ep_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
-    effective_port = port or default_port
-
-    console.print(Panel.fit(
-        f"[bold blue]Service init — {service_name}[/bold blue]\n"
-        f"Domain: {domain}  Port: {effective_port}"
-        + (f"  Path: {path_prefix}" if path_prefix else "")
-        + ("  [internal]" if internal else ""),
-        border_style="blue",
-    ))
-    console.print(f"[dim]Detected entrypoint: {ep_file} → {app_str}[/dim]")
-
-    # Dockerfile
-    dockerfile_path = project_dir / "Dockerfile"
-    if dockerfile_path.exists() and not force:
-        console.print("[dim]Dockerfile already exists, skipping (use --force to overwrite)[/dim]")
-    else:
-        dockerfile_path.write_text(render_dockerfile(app_str, effective_port))
-        console.print(f"[green]✓ Wrote {dockerfile_path}[/green]")
-
-    # docker-compose.yml
-    compose_path = project_dir / "docker-compose.yml"
-    if compose_path.exists() and not force:
-        console.print("[dim]docker-compose.yml already exists, skipping (use --force to overwrite)[/dim]")
-    else:
-        compose_content = render_service_compose(
-            service_name=service_name,
-            domain=domain,
-            port=effective_port,
-            image=image,
-            ingress_networks=ingress_networks,
-            exposure_scope="global" if global_ingress else "single",
-            path_prefix=path_prefix,
-            internal=internal,
-        )
-        compose_path.write_text(compose_content)
-        console.print(f"[green]✓ Wrote {compose_path}[/green]")
-
-    # Service metadata is written independently of compose file
-    # (it must always exist for reconciliation to work correctly)
-    metadata_path = project_dir / ".deploy-service.json"
-    metadata_path.write_text(
-        render_service_metadata(
-            service_name=service_name,
-            domain=domain,
-            port=effective_port,
-            image=image,
-            ingress_networks=ingress_networks,
-            exposure_scope="global" if global_ingress else "single",
-            path_prefix=path_prefix,
-            internal=internal,
-        )
-    )
-    console.print(f"[green]✓ Wrote {metadata_path}[/green]")
-
-    skill_path = write_service_skill(
-        project_dir=project_dir,
-        service_name=service_name,
+    resolver = ServiceInitArgumentResolver()
+    resolution = resolver.resolve(
         domain=domain,
-        port=effective_port,
+        name=name,
+        port=port,
         image=image,
         ingress_networks=ingress_networks,
-        exposure_scope="global" if global_ingress else "single",
+        global_ingress=global_ingress,
         path_prefix=path_prefix,
         internal=internal,
         force=force,
     )
-    if skill_path is None:
-        console.print("[dim]Service skill already exists, skipping (use --force to overwrite)[/dim]")
-    else:
-        console.print(f"[green]✓ Wrote {skill_path}[/green]")
+    if resolution is None:
+        raise click.UsageError("--domain is required unless --internal is set")
 
-    console.print("\n[bold green]✓ Service initialised[/bold green]")
-    console.print(f"  Next: [dim]deploy service deploy --host <host> --image <image>[/dim]")
+    if not execute_service_init(resolution.context, console):
+        sys.exit(1)
 
 
 @service.command(name="deploy")

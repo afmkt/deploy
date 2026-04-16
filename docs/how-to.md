@@ -352,25 +352,25 @@ services:
 
 ## 8. Local machine target (dev / testing)
 
-All commands accept `--target local` to run the same workflow on the current
-machine without SSH.
+Set `--host localhost` to run the same workflow on the current machine without
+SSH.
 
 **Push source locally:**
 
 ```sh
-deploy push --target local --deploy-path /tmp/deploy/repos
+deploy push --host localhost --deploy-path /tmp/deploy/repos
 ```
 
 **Start the proxy locally:**
 
 ```sh
-deploy proxy up --target local
+deploy proxy up --host localhost
 ```
 
 **Deploy a service locally:**
 
 ```sh
-deploy service deploy -d localhost -i myapp:dev --target local
+deploy service deploy -d localhost -i myapp:dev --host localhost
 ```
 
 The `localhost` domain tells Caddy to use plain HTTP (no TLS certificate
@@ -379,7 +379,7 @@ required), so you can reach the service at `http://localhost/<path>`.
 **Transfer a Docker image to local:**
 
 ```sh
-deploy docker-push -i myapp:dev --target local
+deploy docker-push -i myapp:dev --host localhost
 ```
 
 ---

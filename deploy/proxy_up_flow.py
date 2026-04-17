@@ -77,7 +77,7 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
     console.print(Panel.fit(
         "[bold blue]Proxy — up[/bold blue]\n"
         f"Ingress: {PROXY_IMAGE}\n"
-        f"Target: {display_target(ssh)}\n"
+        f"Remote: {display_target(ssh)}\n"
         f"Networks: {', '.join(context.networks)}",
         border_style="blue",
     ))
@@ -93,7 +93,7 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
             console.print("\n[bold]Step 0: Check native Caddy[/bold]")
             native_caddy_found = mgr.native_caddy_exists()
             if native_caddy_found:
-                console.print("[yellow]⚠ Native Caddy detected on target host[/yellow]")
+                console.print("[yellow]⚠ Native Caddy detected on remote host[/yellow]")
                 if context.migrate_native_caddy:
                     if context.interactive:
                         should_migrate_native_caddy = Confirm.ask(
@@ -113,10 +113,10 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
 
             console.print("\n[bold]Step 2: Check proxy image[/bold]")
             if not mgr.proxy_image_exists_remote():
-                console.print(f"[yellow]Image {PROXY_IMAGE} not found on target.[/yellow]")
+                console.print(f"[yellow]Image {PROXY_IMAGE} not found on remote host.[/yellow]")
                 if context.interactive:
                     should_push_image = Confirm.ask(
-                        f"Push {PROXY_IMAGE} to target now using docker-push?",
+                        f"Push {PROXY_IMAGE} to remote host now using docker-push?",
                         default=True,
                     )
                 else:
@@ -139,7 +139,7 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
                     console.print(f"[yellow]Run: deploy docker-push -i {PROXY_IMAGE} first[/yellow]")
                     return False, None
             else:
-                console.print(f"[green]✓ Image {PROXY_IMAGE} found on target[/green]")
+                console.print(f"[green]✓ Image {PROXY_IMAGE} found on remote host[/green]")
 
             console.print("\n[bold]Step 3: Prepare bootstrap Caddyfile[/bold]")
             if should_migrate_native_caddy:

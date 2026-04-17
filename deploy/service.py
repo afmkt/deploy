@@ -380,7 +380,7 @@ class ServiceManager:
         return exit_code == 0
 
     def get_context_revision(self, context_path: str) -> Optional[str]:
-        """Return the current short revision for a git build context on target."""
+        """Return the current short revision for a git build context on the remote host."""
         exit_code, stdout, _ = self.ssh.execute(
             f"cd {self._q(context_path)} && git rev-parse --short HEAD"
         )
@@ -389,15 +389,15 @@ class ServiceManager:
         return stdout.strip() or None
 
     def build_image_from_context(self, image: str, context_path: str) -> bool:
-        """Build a Docker image from an existing context directory on target."""
-        console.print(f"[blue]Building '{image}' on target from {context_path}...[/blue]")
+        """Build a Docker image from an existing context directory on the remote host."""
+        console.print(f"[blue]Building '{image}' on remote host from {context_path}...[/blue]")
         exit_code, _, stderr = self.ssh.execute(
             f"docker build -t {self._q(image)} {self._q(context_path)}"
         )
         if exit_code != 0:
             console.print(f"[red]✗ Remote docker build failed: {stderr.strip()}[/red]")
             return False
-        console.print(f"[green]✓ Image '{image}' built on target[/green]")
+        console.print(f"[green]✓ Image '{image}' built on remote host[/green]")
         return True
 
     def ensure_service_dir(self, service_name: str) -> bool:

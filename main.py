@@ -65,7 +65,7 @@ def _build_connection_from_config(
     use_config: bool = True,
     command_timeout: float | None = None,
 ):
-    """Return a target connection, loading missing fields from saved config."""
+    """Return a remote connection, loading missing fields from saved config."""
     completed = resolve_connection_profile(
         config,
         section,
@@ -97,7 +97,7 @@ def _build_connection_from_config(
 def main(repo_path: str, host: str, port: int, username: str, key: str,
         password: str, deploy_path: str, interactive: bool, use_config: bool, dry_run: bool,
 ):
-    """Git SSH Deploy Tool - Sync local Git repository to a deployment target.
+    """Git SSH Deploy Tool - Sync local Git repository to a remote repository.
 
     This tool automates repository setup, remote configuration, and deployment
     in a single command.
@@ -130,9 +130,9 @@ def main(repo_path: str, host: str, port: int, username: str, key: str,
     )
     if resolution and resolution.used_saved_args:
         console.print("[dim]Loading arguments from config...[/dim]")
-    console.print("\n[bold]Step 2: Configuring target[/bold]")
+    console.print("\n[bold]Step 2: Configuring remote[/bold]")
     if resolution is None:
-        console.print("[red]✗ Username is required for remote targets[/red]")
+        console.print("[red]✗ Username is required for remote connections[/red]")
         sys.exit(1)
 
     success = execute_push(resolution.context, console, dry_run=dry_run)
@@ -161,7 +161,7 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
          password: str, deploy_path: str, interactive: bool, commit: bool,
         sync_remote: bool, branch: str, use_config: bool, dry_run: bool,
 ):
-    """Pull from deployment target repository to local.
+    """Pull from remote repository to local.
 
     This tool pulls changes from the remote repository to the local repository.
     """
@@ -196,9 +196,9 @@ def pull(repo_path: str, host: str, port: int, username: str, key: str,
     )
     if resolution and resolution.used_saved_args:
         console.print("[dim]Loading arguments from config...[/dim]")
-    console.print("\n[bold]Step 2: Configuring target[/bold]")
+    console.print("\n[bold]Step 2: Configuring remote[/bold]")
     if resolution is None:
-        console.print("[red]✗ Username is required for remote targets[/red]")
+        console.print("[red]✗ Username is required for remote connections[/red]")
         sys.exit(1)
 
     success = execute_pull(resolution.context, console, dry_run=dry_run)
@@ -258,7 +258,7 @@ def clear_config(command: str):
 @click.option("--username", "-u", help="SSH username")
 @click.option("--key", "-k", help="Path to SSH private key")
 @click.option("--password", help="SSH password (not recommended, use key instead)")
-@click.option("--platform", help="Target platform override (e.g. linux/amd64, linux/arm64)")
+@click.option("--platform", help="Remote platform override (e.g. linux/amd64, linux/arm64)")
 @click.option("--registry-username", help="Docker registry username for private images")
 @click.option("--registry-password", help="Docker registry password for private images")
 @click.option("--interactive/--no-interactive", default=True, help="Interactive mode")
@@ -268,14 +268,14 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
                 password: str, platform: str | None, registry_username: str,
                 registry_password: str, interactive: bool, use_config: bool,
                                 dry_run: bool):
-    """Push a Docker image to the deployment target.
+    """Push a Docker image to the remote host.
 
-    Pulls the image locally for the target architecture, saves it to a tarball,
-    copies it to the target, and loads it there.
+    Pulls the image locally for the remote architecture, saves it to a tarball,
+    copies it to the remote host, and loads it there.
     """
     console.print(Panel.fit(
         "[bold blue]Git SSH Deploy Tool - Docker Push[/bold blue]\n"
-        "Transfer a Docker image to the deployment target",
+        "Transfer a Docker image to the remote host",
         border_style="blue",
     ))
 
@@ -298,9 +298,9 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
     if resolution and resolution.used_saved_args:
         console.print("[dim]Loading arguments from config...[/dim]")
 
-    console.print("\n[bold]Step 1: Configuring target[/bold]")
+    console.print("\n[bold]Step 1: Configuring remote[/bold]")
     if resolution is None:
-        console.print("[red]✗ Username is required for remote targets[/red]")
+        console.print("[red]✗ Username is required for remote connections[/red]")
         sys.exit(1)
 
     success = execute_docker_push(resolution.context, console, dry_run=dry_run)
@@ -317,7 +317,7 @@ def docker_push(image: str, host: str, port: int, username: str, key: str,
 
 @click.group()
 def proxy():
-    """Manage the caddy-docker-proxy ingress container on the deployment target."""
+    """Manage the caddy-docker-proxy ingress container on the remote host."""
     pass
 
 
@@ -461,7 +461,7 @@ def proxy_logs(host, port, username, key, password, use_config, lines):
 @click.option("--lines", default=80, show_default=True,
               help="How many log/journal lines to fetch")
 def proxy_diagnose(host, port, username, key, password, use_config, lines):
-    """Collect proxy and native Caddy diagnostics from the deployment target."""
+    """Collect proxy and native Caddy diagnostics from the remote host."""
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "proxy", host, port, username, key, password, use_config)
     if ssh is None:
@@ -474,7 +474,7 @@ def proxy_diagnose(host, port, username, key, password, use_config, lines):
 
             console.print(Panel.fit(
                 "[bold blue]Proxy Diagnose[/bold blue]\n"
-                "Target Caddy migration diagnostics",
+                "Remote Caddy migration diagnostics",
                 border_style="blue",
             ))
 
@@ -564,11 +564,11 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
 @click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
 @click.option("--rebuild", is_flag=True, default=False,
-              help="Force a rebuild of the image from the remote build context even if the image already exists on target")
+              help="Force a rebuild of the image from the remote build context even if the image already exists on the remote host")
 @click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
-              help="Action when image is missing on target")
+              help="Action when image is missing on the remote host")
 @click.option("--auto-sync-context/--no-auto-sync-context", default=True,
-              help="Automatically sync repository context on target before remote build when needed")
+              help="Automatically sync repository context on the remote host before remote build when needed")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -580,10 +580,10 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
               help="Interactive mode")
 def service_up(name, deploy_path, rebuild, missing_image_action, auto_sync_context,
                    host, ssh_port, username, key, password, use_config, interactive):
-    """Deploy a service image to the deployment target and register with ingress.
+    """Deploy a service image to the remote host and register with ingress.
 
     Reads scaffolded routing/build intent from local docker-compose.yml.
-    When the image does not exist on target, the command can push or build it.
+    When the image does not exist on the remote host, the command can push or build it.
     """
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
@@ -712,7 +712,7 @@ def service_status(name, host, port, username, key, password, use_config):
                     console.print("\n[bold]Recent logs:[/bold]")
                     console.print(logs.rstrip())
             else:
-                console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
+                console.print(f"[yellow]Service '{service_name}' not found on remote host[/yellow]")
     except ConnectionError:
         sys.exit(1)
 
@@ -795,7 +795,7 @@ def monitor(host, port, username, key, password, use_config, refresh_interval, l
 
     console.print(Panel.fit(
         "[bold blue]Deploy Monitor[/bold blue]\n"
-        f"Target: {display_target(ssh)}",
+        f"Remote: {display_target(ssh)}",
         border_style="blue",
     ))
     connection_factory = LocalConnection if is_local_connection(ssh) else SSHConnection

@@ -109,7 +109,7 @@ def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bo
     repo_name = repo.get_repo_name()
     console.print(f"[green]Repository name: {repo_name}[/green]")
 
-    console.print("\n[bold]Step 3: Connecting to target[/bold]")
+    console.print("\n[bold]Step 3: Connecting to remote host[/bold]")
     ssh = build_connection(context.profile)
 
     try:
@@ -118,13 +118,13 @@ def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bo
                 console.print("\n[green]✓ Dry run completed successfully - connection and arguments are valid[/green]")
                 return True
 
-            console.print("\n[bold]Step 4: Setting up deployment target[/bold]")
+            console.print("\n[bold]Step 4: Setting up remote repository[/bold]")
             remote = RemoteServer(ssh, context.deploy_path)
             current_branch = repo.get_current_branch() or "main"
             success, bare_repo_url = remote.setup_deployment(repo_name, current_branch)
 
             if not success:
-                console.print("[red]✗ Failed to setup deployment target[/red]")
+                console.print("[red]✗ Failed to set up remote repository[/red]")
                 return False
 
             console.print("\n[bold]Step 5: Configuring local remote[/bold]")
@@ -133,9 +133,9 @@ def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bo
                 console.print("[red]✗ Failed to add remote[/red]")
                 return False
 
-            console.print("\n[bold]Step 6: Pushing to deployment target[/bold]")
+            console.print("\n[bold]Step 6: Pushing to remote repository[/bold]")
             if not repo.push(remote_name):
-                console.print("[red]✗ Failed to push to deployment target[/red]")
+                console.print("[red]✗ Failed to push to remote repository[/red]")
                 return False
 
             console.print("\n[bold]Step 7: Updating deployment working directory[/bold]")

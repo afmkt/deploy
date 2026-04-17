@@ -88,7 +88,7 @@ def execute_docker_push(
     dry_run: bool = False,
 ) -> bool:
     """Execute deploy docker-push using fully resolved arguments."""
-    console.print("\n[bold]Step 2: Connecting to target[/bold]")
+    console.print("\n[bold]Step 2: Connecting to remote host[/bold]")
     ssh = build_connection(context.profile)
 
     try:
@@ -99,9 +99,9 @@ def execute_docker_push(
                 console.print("\n[bold]Dry Run Analysis[/bold]")
                 if docker_mgr.is_docker_installed():
                     version = docker_mgr.get_docker_version()
-                    console.print(f"  [green]✓ Docker is installed on target (version: {version})[/green]")
+                    console.print(f"  [green]✓ Docker is installed on remote host (version: {version})[/green]")
                 else:
-                    console.print("  [yellow]⚠ Docker is not installed on target[/yellow]")
+                    console.print("  [yellow]⚠ Docker is not installed on remote host[/yellow]")
                 detected = docker_mgr.detect_remote_arch()
                 effective_platform = context.platform or detected
                 console.print(f"  Platform: {effective_platform or 'unknown'}")
@@ -109,9 +109,9 @@ def execute_docker_push(
                 console.print("\n[green]✓ Dry run completed[/green]")
                 return True
 
-            console.print("\n[bold]Step 3: Checking Docker on target[/bold]")
+            console.print("\n[bold]Step 3: Checking Docker on remote host[/bold]")
             if not docker_mgr.is_docker_installed():
-                console.print("[yellow]Docker is not installed on the target[/yellow]")
+                console.print("[yellow]Docker is not installed on the remote host[/yellow]")
                 if context.interactive:
                     from rich.prompt import Confirm
 
@@ -125,7 +125,7 @@ def execute_docker_push(
                 version = docker_mgr.get_docker_version()
                 console.print(f"[green]✓ Docker is installed (version: {version})[/green]")
 
-            console.print("\n[bold]Step 4: Detecting target platform[/bold]")
+            console.print("\n[bold]Step 4: Detecting remote platform[/bold]")
             resolved_platform = context.platform
             if resolved_platform:
                 console.print(f"[dim]Using user-supplied platform: {resolved_platform}[/dim]")
@@ -159,12 +159,12 @@ def execute_docker_push(
 
             step += 1
             remote_tar = f"/tmp/{tar_filename}"
-            console.print(f"\n[bold]Step {step}: Copying tarball to target[/bold]")
+            console.print(f"\n[bold]Step {step}: Copying tarball to remote host[/bold]")
             if not docker_mgr.transfer_tarball(local_tar, remote_tar):
                 return False
 
             step += 1
-            console.print(f"\n[bold]Step {step}: Loading image on target[/bold]")
+            console.print(f"\n[bold]Step {step}: Loading image on remote host[/bold]")
             if not docker_mgr.load_image(remote_tar, context.image):
                 return False
 

@@ -87,7 +87,9 @@ def prompt_connection_details(
     """
     console.print("\n[bold blue]SSH Connection Details[/bold blue]")
 
-    host = Prompt.ask("Host (hostname or IP)", default=default_host or "")
+    host = (default_host or "").strip()
+    if not host:
+        host = Prompt.ask("Remote host (hostname or IP)", default="")
     if not validate_host(host):
         console.print("[red]✗ Invalid host[/red]")
         sys.exit(1)

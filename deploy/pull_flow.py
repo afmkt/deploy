@@ -117,7 +117,7 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
     repo_name = repo.get_repo_name()
     console.print(f"[green]Repository name: {repo_name}[/green]")
 
-    console.print("\n[bold]Step 3: Connecting to target[/bold]")
+    console.print("\n[bold]Step 3: Connecting to remote host[/bold]")
     ssh = build_connection(context.profile)
 
     try:
@@ -178,7 +178,7 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
                     return False
 
             step_num = 7 if context.sync_remote else 6
-            console.print(f"\n[bold]Step {step_num}: Pulling from deployment target to local[/bold]")
+            console.print(f"\n[bold]Step {step_num}: Pulling from remote repository to local[/bold]")
             remote_name = "deploy"
             bare_repo_url = construct_repo_url(bare_repo_path, ssh)
             if not repo.add_remote(remote_name, bare_repo_url):
@@ -190,7 +190,7 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
                 return False
 
             if not repo.pull(remote_name):
-                console.print("[red]✗ Failed to pull from deployment target[/red]")
+                console.print("[red]✗ Failed to pull from remote repository[/red]")
                 return False
 
             local_revision = repo.get_current_revision()

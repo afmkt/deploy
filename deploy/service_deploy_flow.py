@@ -136,7 +136,7 @@ def execute_service_deploy(
             console.print(Panel.fit(
                 f"[bold blue]Service deploy — {service_name}[/bold blue]\n"
                 f"Image: {image}  Domain: {domain}  Port: {port}\n"
-                f"Target: {display_target(ssh)}\n"
+                f"Remote: {display_target(ssh)}\n"
                 + (f"Path prefix: {path_prefix}\n" if path_prefix else "")
                 + (f"Mode: internal (no ingress)\n" if internal else f"Ingress: {'all configured networks' if global_ingress else ', '.join(ingress_networks)}"),
                 border_style="blue",
@@ -155,14 +155,14 @@ def execute_service_deploy(
                 return False, None
 
             # Step 2: check image availability on remote
-            console.print("\n[bold]Step 2: Check image on target[/bold]")
+            console.print("\n[bold]Step 2: Check image on remote host[/bold]")
             image_missing = not svc_mgr.image_exists_remote(image)
             if image_missing or context.rebuild:
                 if context.rebuild and not image_missing:
-                    console.print(f"[blue]Rebuilding image '{image}' on target...[/blue]")
+                    console.print(f"[blue]Rebuilding image '{image}' on remote host...[/blue]")
                     choice = "build"
                 else:
-                    console.print(f"[yellow]Image '{image}' not found on target.[/yellow]")
+                    console.print(f"[yellow]Image '{image}' not found on remote host.[/yellow]")
                     choice = context.missing_image_action
                 if choice == "ask":
                     if not context.interactive:
@@ -213,14 +213,14 @@ def execute_service_deploy(
 
                     if not svc_mgr.context_is_git_repo(context_path):
                         console.print(
-                            f"[yellow]Build context not found on target at {context_path}.[/yellow]"
+                            f"[yellow]Build context not found on remote host at {context_path}.[/yellow]"
                         )
                         should_sync = context.auto_sync_context
                         if not should_sync and context.interactive:
                             from rich.prompt import Prompt
 
                             should_sync = Prompt.ask(
-                                "Sync repository to target now using deploy push?",
+                                "Sync repository to remote host now using deploy push?",
                                 choices=["yes", "no"],
                                 default="yes",
                             ) == "yes"
@@ -242,14 +242,14 @@ def execute_service_deploy(
                         return False, None
                     if local_revision and remote_revision != local_revision:
                         console.print(
-                            f"[yellow]Revision mismatch: local {local_revision} vs target {remote_revision}[/yellow]"
+                            f"[yellow]Revision mismatch: local {local_revision} vs remote {remote_revision}[/yellow]"
                         )
                         should_sync = context.auto_sync_context
                         if not should_sync and context.interactive:
                             from rich.prompt import Prompt
 
                             should_sync = Prompt.ask(
-                                "Sync repository to target now using deploy push?",
+                                "Sync repository to remote host now using deploy push?",
                                 choices=["yes", "no"],
                                 default="yes",
                             ) == "yes"
@@ -283,7 +283,7 @@ def execute_service_deploy(
                     )
                     return False, None
             else:
-                console.print(f"[green]✓ Image '{image}' found on target[/green]")
+                console.print(f"[green]✓ Image '{image}' found on remote host[/green]")
 
             effective_networks = (
                 proxy_mgr.get_configured_ingress_networks() if global_ingress else ingress_networks

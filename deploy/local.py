@@ -45,17 +45,17 @@ class LocalConnection:
 
     def connect(self) -> bool:
         self._connected = True
-        console.print(f"[green]✓ Using local target as {self.username}@{socket.gethostname()}[/green]")
+        console.print(f"[green]✓ Using local host as {self.username}@{socket.gethostname()}[/green]")
         return True
 
     def disconnect(self):
         if self._connected:
-            console.print("[yellow]Disconnected from local target[/yellow]")
+            console.print("[yellow]Disconnected from local host[/yellow]")
         self._connected = False
 
     def execute(self, command: str, timeout: Optional[float] = None) -> tuple[int, str, str]:
         if not self._connected:
-            console.print("[red]✗ Local target is not connected[/red]")
+            console.print("[red]✗ Local host is not connected[/red]")
             return -1, "", "Not connected"
 
         effective_timeout = timeout if timeout is not None else self.command_timeout

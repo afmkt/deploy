@@ -101,7 +101,7 @@ def complete_connection_profile(profile: ConnectionProfile, interactive: bool) -
     resolved = profile.resolved()
 
     if interactive and not resolved.host:
-        prompted_host = Prompt.ask("Host (hostname or IP)", default="localhost").strip()
+        prompted_host = Prompt.ask("Remote host (or localhost)", default="localhost").strip()
         resolved = ConnectionProfile(
             host=prompted_host,
             port=resolved.port,
@@ -165,7 +165,7 @@ def build_connection(profile: ConnectionProfile, command_timeout: float | None =
 def managed_connection(connection) -> Iterator[Any]:
     """Ensure connect/disconnect lifecycle is consistent across commands."""
     if not connection.connect():
-        raise ConnectionError("Failed to connect to deployment target")
+        raise ConnectionError("Failed to connect to remote host")
     try:
         yield connection
     finally:

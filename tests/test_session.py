@@ -79,6 +79,23 @@ def test_complete_connection_profile_prompts_for_missing_host_and_resolves_local
     assert resolved.host == "localhost"
 
 
+def test_complete_connection_profile_uses_explicit_remote_host_prompt(monkeypatch):
+    prompt_details = Mock(side_effect=AssertionError("prompt_connection_details should not be called for local host"))
+    prompt_calls = []
+
+    def fake_prompt(label, **kwargs):
+        prompt_calls.append((label, kwargs.get("default")))
+        return "localhost"
+
+    monkeypatch.setattr("deploy.session.Prompt.ask", fake_prompt)
+    monkeypatch.setattr("deploy.session.prompt_connection_details", prompt_details)
+
+    resolved = complete_connection_profile(ConnectionProfile(), interactive=True)
+
+    assert resolved is not None
+    assert prompt_calls == [("Remote host (or localhost)", "localhost")]
+
+
 def test_complete_connection_profile_prompts_for_missing_remote_identity(monkeypatch):
     monkeypatch.setattr("deploy.session.Prompt.ask", lambda *args, **kwargs: "example.com")
     details_mock = Mock(return_value={

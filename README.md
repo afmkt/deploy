@@ -393,23 +393,6 @@ deploy svc init --name <service> -d <correct-host>
 deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
 
-## Monitor TUI
-
-Run the long-running operations monitor:
-
-```sh
-deploy monitor --use-config
-```
-
-Useful options:
-
-- `--refresh-interval <seconds>`: polling interval (default `5`)
-- `--log-lines <count>`: lines fetched for log actions (default `120`)
-- `--command-timeout <seconds>`: SSH timeout per remote command (default `10`)
-- `--action-timeout <seconds>`: overall timeout per monitor action (default `15`)
-
-The monitor accepts the same `--remote`, `--port`, `--username`, `--key`, `--password`, `--use-config` options as other commands.
-
 ## Configuration
 
 Saved config file:
@@ -519,43 +502,43 @@ Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the cur
 
 Start a service on the target using an existing image.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--name` | `-n` | *(current dir)* | Service name |
-| `--remote` | | | Remote server hostname or IP |
-| `--port` | | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--name` | *(current dir)* | Service name |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--use-config/--no-use-config` | on | Load SSH args from saved config |
 
 #### `deploy svc status`
 
 Show routing, access URLs, and recent container logs.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--name` | `-n` | *(current dir)* | Service name |
-| `--remote` | | | Remote server hostname or IP |
-| `--port` | | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--name` | *(current dir)* | Service name |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--use-config/--no-use-config` | on | Load SSH args from saved config |
 
 #### `deploy svc down`
 
 Stop and remove service containers for one service.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--name` | `-n` | *(current dir)* | Service name |
-| `--remote` | | | Remote server hostname or IP |
-| `--port` | | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--name` | *(current dir)* | Service name |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--use-config/--no-use-config` | on | Load SSH args from saved config |
 
 ---
 

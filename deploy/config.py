@@ -36,9 +36,6 @@ CONFIG_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
         "status": _CONNECTION_KEYS,
         "down": _CONNECTION_KEYS,
     },
-    "monitor": {
-        "_": _CONNECTION_KEYS,
-    },
 }
 
 # Fields whose string values should have ~ expanded on load.

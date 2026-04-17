@@ -18,8 +18,6 @@ For option-by-option argument resolution and command behavior, see `docs/cli-ref
 8. [Local machine target (dev / testing)](#8-local-machine-target-dev--testing)
 9. [Bring a service down](#9-bring-a-service-down)
 10. [Recover remote edits back to local](#10-recover-remote-edits-back-to-local)
-11. [Monitor and operate services interactively](#11-monitor-and-operate-services-interactively)
-
 ---
 
 ## 1. Set up the ingress proxy
@@ -221,7 +219,7 @@ deploy proxy up \
 Or equivalently with comma-separated values:
 
 ```sh
-deploy proxy up --network app-a,app-b
+deploy proxy up --network app-a --network app-b
 ```
 
 **Deploy each service on its own network:**
@@ -457,41 +455,3 @@ Pull into a specific local branch:
 ```sh
 deploy repo pull --sync-remote --branch hotfix/fix-upstream
 ```
-
----
-
-## 11. Monitor and operate services interactively
-
-The monitor TUI gives a live view of service state and allows common operations
-without re-typing commands.
-
-**Start the monitor:**
-
-```sh
-deploy monitor --use-config
-```
-
-**Useful options:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--refresh-interval` | `5` | Polling interval in seconds |
-| `--log-lines` | `120` | Lines fetched per log action |
-| `--command-timeout` | `10` | SSH timeout per remote command (seconds) |
-| `--action-timeout` | `15` | Overall timeout per monitor action (seconds) |
-
-**Keybindings:**
-
-| Key | Action |
-|-----|--------|
-| `r` | Refresh now |
-| `u` | Proxy up |
-| `d` | Proxy down |
-| `s` | Start selected service |
-| `x` | Stop selected service |
-| `z` | Stop and remove selected service deployment |
-| `t` | Restart selected service |
-| `n` | Create Docker network |
-| `l` | Fetch logs (selected service, or proxy if none selected) |
-| `c` | Cancel in-progress action |
-| `q` | Quit |

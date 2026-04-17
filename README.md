@@ -66,8 +66,9 @@ uv run python main.py --help
 push
 pull
 docker-push
+image
 proxy
-service
+svc
 monitor
 show-config
 clear-config
@@ -206,7 +207,7 @@ If old native services are proxied through rewritten host addresses, those servi
 Run inside your service directory:
 
 ```sh
-deploy service init -d api.example.com
+deploy svc init -d api.example.com
 ```
 
 Useful options:
@@ -219,19 +220,19 @@ Useful options:
 Example with isolated app network:
 
 ```sh
-deploy service init -d api.example.com --ingress-network app-a
+deploy svc init -d api.example.com --ingress-network app-a
 ```
 
 Example with a path prefix (API lives at `/api/auth` on a shared domain):
 
 ```sh
-deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
 ```
 
 Example for an internal service (no public routing):
 
 ```sh
-deploy service init --name session-store --internal
+deploy svc init --name session-store --internal
 ```
 
 This generates:
@@ -240,50 +241,58 @@ This generates:
 - `docker-compose.yml`
 - `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance
 
-### Deploy Service to Target
+### Deliver Image And Start Service
 
-`service deploy` now reads routing/build intent from local `docker-compose.yml`
-(scaffolded by `service init`) and uses those values for deployment.
+`svc up` reads routing intent from local `docker-compose.yml` (scaffolded by
+`svc init`) and starts the service. Image delivery is performed separately.
+
+Build image on target from synced source:
 
 ```sh
-deploy service deploy --host <host> --username <user> --key <ssh_key>
+deploy image build-remote -i <image:tag> --host <host> --username <user> --key <ssh_key>
+```
+
+Or push a pre-built local image:
+
+```sh
+deploy image push -i <image:tag> --host <host> --username <user> --key <ssh_key>
+```
+
+Then start service:
+
+```sh
+deploy svc up --host <host> --username <user> --key <ssh_key>
 ```
 
 Local target:
 
 ```sh
-deploy service deploy --host localhost
+deploy svc up --host localhost
 ```
 
 Useful options:
 
-- `--rebuild`: Force a fresh Docker image build from the remote build context even if the image already exists on the target.
-- `--missing-image-action {ask|push|build|abort}`: Behavior when the compose image is missing on target.
-- `--deploy-path`: Remote repo base used for remote build context (`deploy push` path).
-- `--auto-sync-context/--no-auto-sync-context`: Automatically sync git context before remote build when needed.
 - `--host localhost`: Deploy to the current machine instead of a remote host.
 
 Notes:
 
-- `docker-compose.yml` is required for `service deploy`.
+- `docker-compose.yml` is required for `svc up`.
 - For non-internal services, `docker-compose.yml` must include a `caddy:` label.
-- If compose uses `build: .` and no explicit `image:`, deploy defaults to `<service-name>:latest` for target-side image checks/builds.
+- If compose uses `build: .` and no explicit `image:`, the default image name is `<service-name>:latest`.
+- `svc up` fails if the image does not exist on the target host.
 
-#### Rebuild an Updated Service
+#### Update An Existing Service
 
-After changing source code or dependencies, rebuild and redeploy:
+After changing source code or dependencies, build and redeploy:
 
 ```sh
-deploy service deploy --rebuild
+deploy image build-remote -i <image:tag>
+deploy svc up
 ```
-
-This builds a fresh image from the remote build context and restarts the container.
-Without `--rebuild`, the deploy reuses the existing image if it is already present
-on the target.
 
 #### Accessing the Service
 
-`service status` shows the active routing information after each deploy:
+`svc status` shows the active routing information after each deploy:
 
 ```
 Route host: api.example.com
@@ -300,15 +309,17 @@ In-network access: http://<service-name>:8000/<path>
 Example with isolated app network:
 
 ```sh
-deploy service init -d api.example.com --ingress-network app-a
-deploy service deploy --host <host> --username <user> --key <ssh_key>
+deploy svc init -d api.example.com --ingress-network app-a
+deploy image build-remote -i api:latest --host <host> --username <user> --key <ssh_key>
+deploy svc up --host <host> --username <user> --key <ssh_key>
 ```
 
 Example with a globally exposed service:
 
 ```sh
-deploy service init -d api.example.com --global-ingress
-deploy service deploy --host <host> --username <user> --key <ssh_key>
+deploy svc init -d api.example.com --global-ingress
+deploy image build-remote -i api:latest --host <host> --username <user> --key <ssh_key>
+deploy svc up --host <host> --username <user> --key <ssh_key>
 ```
 
 ### Path-Based Routing — Multiple Services on One Domain
@@ -319,12 +330,12 @@ prefixed services only handle requests under their path.
 
 ```sh
 # Auth UI — owns the domain root
-deploy service init -d auth.example.com --name auth-ui
-deploy service deploy --name auth-ui --host <host> --username <user> --key <ssh_key>
+deploy svc init -d auth.example.com --name auth-ui
+deploy svc up --name auth-ui --host <host> --username <user> --key <ssh_key>
 
 # Auth API — owns /api/auth/* only; prefix is stripped before forwarding
-deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
-deploy service deploy --name auth-api --host <host> --username <user> --key <ssh_key>
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy svc up --name auth-api --host <host> --username <user> --key <ssh_key>
 ```
 
 Both containers must join the same ingress network. Caddy merges them into one
@@ -334,12 +345,12 @@ upstream, so the service sees `/login` for an incoming `/api/auth/login` request
 ### Internal Services — No Public Routing
 
 For caches, databases, background workers, and other containers that must not be
-exposed to the internet, use `--internal` during `service init`. No Caddy labels or ingress network
+exposed to the internet, use `--internal` during `svc init`. No Caddy labels or ingress network
 membership are added.
 
 ```sh
-deploy service init --name session-store --internal
-deploy service deploy --name session-store --host <host> --username <user> --key <ssh_key>
+deploy svc init --name session-store --internal
+deploy svc up --name session-store --host <host> --username <user> --key <ssh_key>
 ```
 
 `--domain` is optional for internal services. The container is reachable by name
@@ -353,21 +364,21 @@ Recommended shared-host pattern:
 
 ```sh
 # Set up services with their network and domain
-deploy service init -n app-a -d a.example.com --ingress-network app-a -i <image:a>
-deploy service init -n app-b -d b.example.com --ingress-network app-b -i <image:b>
+deploy svc init -n app-a -d a.example.com --ingress-network app-a -i <image:a>
+deploy svc init -n app-b -d b.example.com --ingress-network app-b -i <image:b>
 
 # Start shared proxy
 deploy proxy up --use-config --ingress-network app-a --ingress-network app-b
 
 # Deploy services (configuration comes from docker-compose.yml)
-deploy service deploy -n app-a --host <host> --username <user> --key <ssh_key>
-deploy service deploy -n app-b --host <host> --username <user> --key <ssh_key>
+deploy svc up -n app-a --host <host> --username <user> --key <ssh_key>
+deploy svc up -n app-b --host <host> --username <user> --key <ssh_key>
 ```
 
 ### Check Service Status
 
 ```sh
-deploy service status
+deploy svc status
 ```
 
 Output includes:
@@ -382,11 +393,11 @@ Output includes:
 
 A mismatch between route host and metadata domain means the running container is
 routing for a different hostname than the current metadata records. Fix it by
-re-running `service init` with the correct domain and then deploying:
+re-running `svc init` with the correct domain and then deploying:
 
 ```sh
-deploy service init --name <service> -d <correct-host>
-deploy service deploy --name <service> --host <host> --username <user> --key <ssh_key>
+deploy svc init --name <service> -d <correct-host>
+deploy svc up --name <service> --host <host> --username <user> --key <ssh_key>
 ```
 
 ## Monitor TUI
@@ -549,11 +560,11 @@ All subcommands accept the shared connection options: `--host`, `--port`, `--use
 
 ---
 
-### `deploy service`
+### `deploy svc`
 
-Scaffold and deploy Docker-based services.
+Scaffold and operate Docker-based services.
 
-#### `deploy service init`
+#### `deploy svc init`
 
 Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the current directory.
 
@@ -567,32 +578,21 @@ Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the cur
 | `--global-ingress` | | off | Join every configured ingress network |
 | `--force` | | off | Overwrite existing `Dockerfile` / `docker-compose.yml` |
 
-#### `deploy service deploy`
+#### `deploy svc up`
 
-Build or push a service image and start it on the target.
+Start a service on the target using an existing image.
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--name` | `-n` | *(current dir)* | Service name |
-| `--domain` | `-d` | | Public hostname — always provide explicitly |
-| `--image` | `-i` | *(from metadata)* | Docker image name/tag |
-| `--port` | | `8000` | App port inside container |
-| `--rebuild` | | off | Force image rebuild even if already present on target |
-| `--allow-remote-domain-fallback` | | off | Allow reusing domain from persisted target metadata |
-| `--missing-image-action` | | `ask` | `ask` \| `push` \| `build` \| `abort` |
-| `--auto-sync-context/--no-auto-sync-context` | | on | Auto-sync repo to target before remote build |
-| `--deploy-path` | | *(from config)* | Remote base path for build context |
-| `--ingress-network` | | `ingress` | External network for routing (repeatable or comma-separated) |
-| `--global-ingress` | | off | Join every configured ingress network |
 | `--host` | `-h` | | Remote server hostname or IP |
 | `--ssh-port` | | `22` | SSH port |
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
 | `--use-config` | | on | Load SSH args from saved config |
-| `--interactive/--no-interactive` | | on | Interactive mode |
 
-#### `deploy service status`
+#### `deploy svc status`
 
 Show routing, access URLs, and recent container logs.
 
@@ -605,6 +605,60 @@ Show routing, access URLs, and recent container logs.
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
 | `--use-config` | | on | Load SSH args from saved config |
+
+#### `deploy svc down`
+
+Stop and remove service containers for one service.
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--name` | `-n` | *(current dir)* | Service name |
+| `--host` | `-h` | | Remote server hostname or IP |
+| `--port` | `-p` | `22` | SSH port |
+| `--username` | `-u` | | SSH username |
+| `--key` | `-k` | | Path to SSH private key |
+| `--password` | | | SSH password |
+| `--use-config` | | on | Load SSH args from saved config |
+
+---
+
+### `deploy image`
+
+Deliver service images to the target host.
+
+#### `deploy image push`
+
+Transfer a pre-built local image to the target host.
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--image` | `-i` | *(required)* | Docker image to transfer (`name:tag`) |
+| `--platform` | | | Target platform override |
+| `--registry-username` | | | Docker registry username |
+| `--registry-password` | | | Docker registry password |
+| `--host` | `-h` | | Remote server hostname or IP |
+| `--ssh-port` | | `22` | SSH port |
+| `--username` | `-u` | | SSH username |
+| `--key` | `-k` | | Path to SSH private key |
+| `--password` | | | SSH password |
+| `--use-config` | | on | Load SSH args from saved config |
+| `--interactive/--no-interactive` | | on | Interactive mode |
+
+#### `deploy image build-remote`
+
+Build an image on target from the current repository.
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--image` | `-i` | *(required)* | Docker image tag to build |
+| `--deploy-path` | | *(from saved push config)* | Remote base path used for synced repository |
+| `--host` | `-h` | | Remote server hostname or IP |
+| `--ssh-port` | | `22` | SSH port |
+| `--username` | `-u` | | SSH username |
+| `--key` | `-k` | | Path to SSH private key |
+| `--password` | | | SSH password |
+| `--use-config` | | on | Load SSH args from saved config |
+| `--interactive/--no-interactive` | | on | Interactive mode |
 
 ---
 

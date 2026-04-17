@@ -26,21 +26,20 @@ Path argument resolution:
 - push/pull repo_path and deploy_path use load_defaulted_value:
   - if CLI value equals the command default, saved config value is used when present
   - otherwise CLI value is used
-- service deploy build-context deploy_path uses this order:
+- image build-remote deploy_path uses this order:
   1. --deploy-path
-  2. saved service deploy_path
-  3. saved push deploy_path
-  4. saved pull deploy_path
-  5. interactive prompt default
-  6. failure in non-interactive mode
+  2. saved push deploy_path
+  3. interactive prompt default
+  4. failure in non-interactive mode
 
 Config defaults by command:
 
 - push: --use-config defaults to false
 - pull: --use-config defaults to false
 - docker-push: --use-config defaults to false
+- image push/build-remote: --use-config defaults to true
 - proxy subcommands: --use-config defaults to true
-- service deploy/status/down: --use-config defaults to true
+- svc up/status/down: --use-config defaults to true
 - monitor: --use-config defaults to true
 
 ## 2) Argument Catalog
@@ -49,7 +48,7 @@ Config defaults by command:
 
 - --host, -h: Target host or IP
 - --port, -p: SSH port (used by most commands)
-- --ssh-port: SSH port used by service deploy
+- --ssh-port: SSH port used by svc up and image subcommands
 - --username, -u: SSH username
 - --key, -k: SSH private key path
 - --password: SSH password
@@ -58,33 +57,30 @@ Config defaults by command:
 
 Resolution details:
 
-- Present in push, pull, docker-push, proxy subcommands, service deploy/status/down, monitor.
+- Present in push, pull, docker-push, image subcommands, proxy subcommands, svc up/status/down, monitor.
 - Resolved by PushArgumentResolver, PullArgumentResolver, DockerPushArgumentResolver, ProxyUpArgumentResolver, ServiceDeployArgumentResolver, and _build_connection_from_config.
 
 ## Repository and deploy-path arguments
 
 - --repo-path, -r: Local repository path (push, pull)
 - --deploy-path, -d: Remote deploy base path (push, pull)
-- --deploy-path: Remote deploy base path for service deploy build context
+- --deploy-path: Remote deploy base path used by push/pull or image build-remote
 - --branch, -b: Pull target branch
 - --commit/--no-commit: Commit remote working directory changes before pull
 - --sync-remote/--no-sync-remote: Sync remote working tree through bare repo before pull
 
 ## Image and registry arguments
 
-- --image, -i: Docker image name:tag (docker-push; service init/deploy)
+- --image, -i: Docker image name:tag (docker-push, image push, image build-remote, svc init)
 - --platform: Target platform override for docker-push
 - --registry-username: Registry auth username for private pull
 - --registry-password: Registry auth password for private pull
-- --rebuild: Force remote image rebuild in service deploy
-- --missing-image-action: ask|push|build|abort behavior in service deploy
-- --auto-sync-context/--no-auto-sync-context: Auto sync repo context before remote build
 
 ## Routing and ingress arguments
 
-- --domain, -d: Public hostname for service routing (service init/deploy)
+- --domain, -d: Public hostname for service routing (svc init)
 - --name, -n: Service name override
-- --port: Container app port (service init/deploy)
+- --port: Container app port (svc init)
 - --ingress-network (repeatable/comma-separated): Ingress networks
 - --global-ingress/--no-global-ingress: Attach service to all ingress networks
 - --path-prefix: Path-based route prefix
@@ -263,7 +259,7 @@ Arguments:
 
 ## Service command group
 
-### deploy service init
+### deploy svc init
 
 Operation:
 
@@ -283,13 +279,13 @@ Arguments:
 - --internal
 - --force
 
-### deploy service deploy
+### deploy svc up
 
 Operation:
 
 - Loads service routing/build intent from local docker-compose.yml
 - Ensures proxy is running
-- Uses existing image, pushes image, or builds remotely
+- Verifies image exists on target (no implicit push/build)
 - Uploads compose and metadata
 - Starts service containers
 - Persists service connection args
@@ -297,10 +293,29 @@ Operation:
 Arguments:
 
 - --name, -n
-- --deploy-path
-- --rebuild
-- --missing-image-action (ask|push|build|abort, default: ask)
-- --auto-sync-context/--no-auto-sync-context (default: auto-sync-context)
+- --host, -h
+- --ssh-port (default: 22)
+- --username, -u
+- --key, -k
+- --password
+- --use-config/--no-use-config (default: use-config)
+
+## Image command group
+
+### deploy image push
+
+Operation:
+
+- Validates image exists locally
+- Transfers image to target and loads it
+- Persists image-push connection args
+
+Arguments:
+
+- --image, -i (required)
+- --platform
+- --registry-username
+- --registry-password
 - --host, -h
 - --ssh-port (default: 22)
 - --username, -u
@@ -309,7 +324,29 @@ Arguments:
 - --use-config/--no-use-config (default: use-config)
 - --interactive/--no-interactive (default: interactive)
 
-### deploy service status
+### deploy image build-remote
+
+Operation:
+
+- Validates local git repository
+- Syncs repository to target via deploy push
+- Verifies remote revision
+- Builds image on target from synced context
+- Persists image-build-remote connection args
+
+Arguments:
+
+- --image, -i (required)
+- --deploy-path
+- --host, -h
+- --ssh-port (default: 22)
+- --username, -u
+- --key, -k
+- --password
+- --use-config/--no-use-config (default: use-config)
+- --interactive/--no-interactive (default: interactive)
+
+### deploy svc status
 
 Operation:
 
@@ -325,7 +362,7 @@ Arguments:
 - --password
 - --use-config/--no-use-config (default: use-config)
 
-### deploy service down
+### deploy svc down
 
 Operation:
 
@@ -333,7 +370,7 @@ Operation:
 
 Arguments:
 
-- Same as service status
+- Same as svc status
 
 ## Monitor command
 

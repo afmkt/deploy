@@ -254,32 +254,36 @@ def render_service_skill(
 
         ## Project Artifacts
 
-        - Dockerfile: generated and owned by `deploy service init`
+        - Dockerfile: generated and owned by `deploy svc init`
         - Compose file: `docker-compose.yml`
         - Skill file: `.github/skills/deploy-service/SKILL.md`
 
         ## Command Workflow
 
         1. Scaffold or refresh files:
-           `deploy service init -n {service_name}{' --internal' if internal else f' -d {domain}'}`
+              `deploy svc init -n {service_name}{' --internal' if internal else f' -d {domain}'}`
            This creates `Dockerfile`, `docker-compose.yml`, and this skill file.
            The compose file contains all routing and service configuration.
 
         2. Sync source to target when needed:
            `deploy push`
-           Copies the local repository to the target machine.
+              Required before `deploy image build-remote`.
 
         3. Ensure ingress proxy is running:
            `deploy proxy up`
            Starts the Caddy reverse proxy that routes traffic to services.
 
-        4. Deploy service:
-           `deploy service deploy -n {service_name}`
-           Reads configuration from local `docker-compose.yml` and deploys to target.
-           No need to pass `-d`, `-i`, `--port`, etc. — those are set via `service init`.
+          4. Deliver service image to target (choose one):
+              - `deploy image push -i {image_value}` for a pre-built local image.
+              - `deploy image build-remote -i {image_value}` to build on target from synced source.
 
-        5. Check runtime state:
-           `deploy service status -n {service_name}`
+          5. Start service:
+              `deploy svc up -n {service_name}`
+              Reads configuration from local `docker-compose.yml` and starts the service.
+              `deploy svc up` fails fast if the image does not exist on the target.
+
+          6. Check runtime state:
+              `deploy svc status -n {service_name}`
            Shows container status, IP, and routed domain.
 
         ## Configuration Source
@@ -292,7 +296,7 @@ def render_service_skill(
         - Ingress networks: `networks` section
         - Exposure scope: `deploy.scope` label (`internal`, `single`, or `global`)
 
-        Update `docker-compose.yml` directly or re-run `service init` with new flags to change routing.
+        Update `docker-compose.yml` directly or re-run `svc init` with new flags to change routing.
 
         ## Execution Contract
 
@@ -304,10 +308,10 @@ def render_service_skill(
 
         ## Operational Guidance
 
-        - `deploy service deploy` persists remote runtime metadata at `/tmp/deploy/repos/{service_name}.service/.deploy-service.json`.
-        - Update routing by editing `docker-compose.yml` or re-running `service init`.
-        - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
-        - Use `deploy service down -n {service_name}` to stop without deleting remote metadata.
+        - `deploy svc up` persists remote runtime metadata at `/tmp/deploy/repos/{service_name}.service/.deploy-service.json`.
+        - Update routing by editing `docker-compose.yml` or re-running `svc init`.
+        - For code or dependency changes: run `deploy image build-remote -i {image_value}` and then `deploy svc up -n {service_name}`.
+        - Use `deploy svc down -n {service_name}` to stop without deleting remote metadata.
         - For local development, set `--host localhost` to run workflows locally.
         """
     )

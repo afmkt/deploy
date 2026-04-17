@@ -105,7 +105,7 @@ Run these steps once when introducing a service to a host for the first time.
 Inside the service repository root:
 
 ```sh
-deploy service init -d api.example.com
+deploy svc init -d api.example.com
 ```
 
 This generates:
@@ -130,15 +130,31 @@ deploy push \
 deploy proxy up
 ```
 
-### Step 4 — Deploy the service
+### Step 4 — Deliver the image
+
+Choose one mode:
+
+- Build on target from synced source:
 
 ```sh
-deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy image build-remote -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
-`service deploy` checks that the proxy is running, resolves/builds the image from
-local `docker-compose.yml` intent, uploads the compose file, and starts the
-container. On success it prints the routing information:
+- Push a pre-built local image:
+
+```sh
+deploy image push -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
+```
+
+### Step 5 — Start the service
+
+```sh
+deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
+```
+
+`svc up` checks that the proxy is running, verifies the image exists on target,
+uploads the compose file, and starts the container. On success it prints routing
+information:
 
 ```
 Route host: api.example.com
@@ -158,20 +174,17 @@ After editing source code or dependencies:
 deploy push
 ```
 
-**Rebuild image and restart:**
+**Build a new image on target and restart:**
 
 ```sh
-deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519 --rebuild
+deploy image build-remote -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
-
-`--rebuild` forces a fresh `docker build` from the remote source tree even if an
-image with the same tag already exists on the target. Without it, the existing
-image is reused.
 
 **Verify the service came back healthy:**
 
 ```sh
-deploy service status
+deploy svc status
 ```
 
 ---
@@ -184,7 +197,7 @@ to be rebuilt on the target.
 **Transfer the image:**
 
 ```sh
-deploy docker-push -i myapp:1.2.3 \
+deploy image push -i myapp:1.2.3 \
   --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
@@ -194,12 +207,12 @@ via SFTP.
 **Deploy using the transferred image:**
 
 ```sh
-deploy service init -d api.example.com -i myapp:1.2.3
-deploy service deploy --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy svc init -d api.example.com -i myapp:1.2.3
+deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
-Because the image is already present, `service deploy` skips the build/push
-step entirely.
+Because the image is already present on target, `svc up` proceeds directly to
+service startup.
 
 ---
 
@@ -225,10 +238,12 @@ deploy proxy up --ingress-network app-a,app-b
 
 ```sh
 # From the app-a repository (scaffolded with --ingress-network app-a -i app-a:latest)
-deploy service deploy
+deploy image push -i app-a:latest
+deploy svc up
 
 # From the app-b repository (scaffolded with --ingress-network app-b -i app-b:latest)
-deploy service deploy
+deploy image push -i app-b:latest
+deploy svc up
 ```
 
 Services on different networks cannot reach each other directly. The proxy
@@ -237,11 +252,12 @@ routes external traffic to each service via its dedicated network.
 ### Globally exposed services
 
 A service that must be reachable regardless of how the proxy's network list
-changes can be marked global during `service init`:
+changes can be marked global during `svc init`:
 
 ```sh
-deploy service init -i shared:latest -d shared.example.com --global-ingress
-deploy service deploy
+deploy svc init -i shared:latest -d shared.example.com --global-ingress
+deploy image push -i shared:latest
+deploy svc up
 ```
 
 When `proxy up` is later run with a different set of networks, globally exposed
@@ -264,16 +280,18 @@ the prefix before forwarding, so the upstream service sees a clean path.
 
 ```sh
 # Inside the auth-ui repository
-deploy service init -d auth.example.com --name auth-ui
-deploy service deploy --name auth-ui
+deploy svc init -d auth.example.com --name auth-ui
+deploy image build-remote -i auth-ui:latest
+deploy svc up --name auth-ui
 ```
 
 **Scaffold and deploy the API** (serves only `/api/auth/*`):
 
 ```sh
 # Inside the auth-api repository
-deploy service init -d auth.example.com --name auth-api --path-prefix /api/auth
-deploy service deploy --name auth-api
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy image build-remote -i auth-api:latest
+deploy svc up --name auth-api
 ```
 
 The proxy merges both containers into a single virtual host.  Requests to
@@ -317,14 +335,15 @@ supplied value are normalised before the label is written.
 Some services (caches, databases, background workers, sidecars) must be
 reachable by other containers but must not be exposed to the internet.
 
-Pass `--internal` to `service init` to suppress all Caddy labels and ingress network membership.
+Pass `--internal` to `svc init` to suppress all Caddy labels and ingress network membership.
 The container joins only the default project network created by Docker Compose,
 so it is reachable by name from other containers in the same compose project or
 from containers explicitly added to the same network.
 
 ```sh
-deploy service init --name session-store --internal
-deploy service deploy --name session-store
+deploy svc init --name session-store --internal
+deploy image push -i session-store:latest
+deploy svc up --name session-store
 ```
 
 `--domain` is not required for internal services.  If omitted, the service name
@@ -367,8 +386,9 @@ deploy proxy up --host localhost
 **Deploy a service locally:**
 
 ```sh
-deploy service init -d localhost -n myapp
-deploy service deploy --host localhost
+deploy svc init -d localhost -n myapp
+deploy image build-remote -i myapp:latest --host localhost
+deploy svc up --host localhost
 ```
 
 The `localhost` domain tells Caddy to use plain HTTP (no TLS certificate
@@ -377,7 +397,7 @@ required), so you can reach the service at `http://localhost/<path>`.
 **Transfer a Docker image to local:**
 
 ```sh
-deploy docker-push -i myapp:dev --host localhost
+deploy image push -i myapp:dev --host localhost
 ```
 
 ---
@@ -388,14 +408,14 @@ Stop and remove the containers for a service without deleting its metadata or
 compose file on the target:
 
 ```sh
-deploy service down
+deploy svc down
 ```
 
 Run from the service repository root (the directory name resolves the service
 name). Override with `--name` if needed:
 
 ```sh
-deploy service down --name myapp
+deploy svc down --name myapp
 ```
 
 To also stop the ingress proxy:

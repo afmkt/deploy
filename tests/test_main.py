@@ -393,7 +393,8 @@ def test_service_init_summary_reports_argument_origins_for_defaults():
         assert "detected from main.py" in result.output
         assert "ingress_networks: ingress" in result.output
         assert "default (ingress)" in result.output
-        assert "deploy service deploy -n" in result.output
+        assert "deploy image build-remote -i" in result.output
+        assert "deploy svc up -n" in result.output
 
 
 def test_service_init_delegates_to_flow(monkeypatch):

@@ -232,8 +232,10 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
     console.print("  - docker-compose.yml: image/build mode, labels/routing, env vars, mounts, restart policy")
     console.print("  - Flags to rerun with: --path-prefix, --ingress-network, --global-ingress, --internal, --force")
 
+    suggested_image = context.image or f"{context.service_name}:latest"
     next_command = (
-        f"deploy service deploy -n {context.service_name} --host <host> --username <username>"
+        f"deploy image build-remote -i {suggested_image} --host <host> --username <username>\n"
+        f"  deploy svc up -n {context.service_name} --host <host> --username <username>"
     )
     console.print("\n[bold]4. Most likely next command[/bold]")
     console.print(f"  [dim]{next_command}[/dim]")

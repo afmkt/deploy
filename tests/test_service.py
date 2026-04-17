@@ -210,7 +210,7 @@ def test_render_service_compose_path_prefix_includes_ingress_network():
 
 def test_render_service_compose_internal_no_caddy_labels():
     compose = render_service_compose(
-        "session-store", "session-store", 6379, image="redis:alpine",
+        "session-store", port=6379, image="redis:alpine",
         internal=True,
     )
     assert "caddy" not in compose
@@ -219,7 +219,7 @@ def test_render_service_compose_internal_no_caddy_labels():
 
 def test_render_service_compose_internal_no_networks_section():
     compose = render_service_compose(
-        "session-store", "session-store", 6379, image="redis:alpine",
+        "session-store", port=6379, image="redis:alpine",
         internal=True,
     )
     assert "networks:" not in compose
@@ -228,7 +228,7 @@ def test_render_service_compose_internal_no_networks_section():
 
 def test_render_service_compose_internal_no_ingress_network_join():
     compose = render_service_compose(
-        "session-store", "session-store", 6379, image="redis:alpine",
+        "session-store", port=6379, image="redis:alpine",
         internal=True,
     )
     assert "      - ingress" not in compose

@@ -23,7 +23,7 @@ class ServiceInitExecutionContext:
 
     project_dir: Path
     service_name: str
-    domain: str
+    domain: str | None
     port: int
     image: str | None
     ingress_networks: tuple[str, ...]
@@ -74,7 +74,7 @@ class ServiceInitArgumentResolver:
         if not domain and not internal:
             return None
 
-        resolved_domain = domain or service_name
+        resolved_domain = domain
 
         entrypoint_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
         effective_port = port or default_port
@@ -86,11 +86,11 @@ class ServiceInitArgumentResolver:
                 value=service_name,
                 origin="cli (--name)" if name else "default (current directory name)",
             ),
-            ResolvedArgument(
+            *([ResolvedArgument(
                 name="domain",
                 value=resolved_domain,
-                origin="cli (--domain)" if domain else "derived from resolved service name",
-            ),
+                origin="cli (--domain)",
+            )] if resolved_domain else []),
             ResolvedArgument(
                 name="port",
                 value=str(effective_port),
@@ -154,9 +154,10 @@ class ServiceInitArgumentResolver:
 
 def execute_service_init(context: ServiceInitExecutionContext, console: Console) -> bool:
     """Execute deploy service init using fully resolved arguments."""
+    domain_display = f"Domain: {context.domain}  " if context.domain else ""
     console.print(Panel.fit(
         f"[bold blue]Service init - {context.service_name}[/bold blue]\n"
-        f"Domain: {context.domain}  Port: {context.port}"
+        f"{domain_display}Port: {context.port}"
         + (f"  Path: {context.path_prefix}" if context.path_prefix else "")
         + ("  [internal]" if context.internal else ""),
         border_style="blue",

@@ -313,7 +313,7 @@ def test_service_deploy_persists_args_only_after_success(monkeypatch):
     monkeypatch.setattr(main_module, "persist_service_deploy_resolution", fake_persist)
 
     result = runner.invoke(service, [
-        "deploy",
+        "up",
         "--host", "localhost",
         "--username", "tester",
         "--no-use-config",
@@ -365,7 +365,7 @@ def test_service_deploy_does_not_persist_when_execution_fails(monkeypatch):
     monkeypatch.setattr(main_module, "persist_service_deploy_resolution", fake_persist)
 
     result = runner.invoke(service, [
-        "deploy",
+        "up",
         "--host", "localhost",
         "--username", "tester",
         "--no-use-config",
@@ -417,8 +417,7 @@ def test_service_init_summary_reports_argument_origins_for_defaults():
         assert result.exit_code == 0
         assert "name:" in result.output
         assert "default (current directory name)" in result.output
-        assert "domain:" in result.output
-        assert "derived from resolved service name" in result.output
+        assert "domain:" not in result.output
         assert "port: 8000" in result.output
         assert "detected from main.py" in result.output
         assert "ingress_networks: ingress" in result.output
@@ -555,7 +554,7 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
         _write_service_compose("repo/app:latest")
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost",
             "--no-use-config",
         ])
@@ -661,7 +660,7 @@ def test_service_deploy_remote_build_on_missing_image(monkeypatch):
         _write_service_compose("repo/app:latest")
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost",
             "--deploy-path", "/tmp/deploy/repos",
             "--no-use-config",
@@ -722,7 +721,7 @@ def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(mon
         _write_service_compose("repo/app:latest")
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost",
             "--no-use-config",
             "--no-interactive",
@@ -778,7 +777,7 @@ def test_service_deploy_non_interactive_build_requires_deploy_path(monkeypatch):
         _write_service_compose("repo/app:latest")
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost",
             "--no-use-config",
             "--no-interactive",
@@ -1119,7 +1118,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
         monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost", "--no-use-config",
         ])
 
@@ -1166,7 +1165,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
         monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost", "--no-use-config",
             "--no-interactive",
         ])
@@ -1243,7 +1242,7 @@ def test_proxy_status_reports_not_running_state(monkeypatch):
         monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
         result = runner.invoke(service, [
-            "deploy",
+            "up",
             "--host", "localhost", "--no-use-config",
             "--no-interactive",
         ])
@@ -1288,7 +1287,7 @@ def test_service_deploy_requires_local_compose_non_interactive(monkeypatch, tmp_
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
     result = runner.invoke(service, [
-        "deploy",
+        "up",
         "--host", "localhost", "--no-use-config",
         "--no-interactive",
     ])
@@ -1360,7 +1359,7 @@ def test_service_deploy_uses_local_compose_for_routing(monkeypatch, tmp_path):
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *a, **kw: {})
 
     result = runner.invoke(service, [
-        "deploy",
+        "up",
         "--host", "localhost", "--no-use-config",
         "--no-interactive",
     ])

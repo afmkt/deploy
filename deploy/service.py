@@ -95,8 +95,8 @@ def render_dockerfile(app_str: str, port: int) -> str:
 
 def render_service_compose(
     service_name: str,
-    domain: str,
-    port: int,
+    domain: Optional[str] = None,
+    port: int = 8000,
     image: Optional[str] = None,
     build: bool = True,
     ingress_network: Optional[str] = None,
@@ -121,7 +121,7 @@ def render_service_compose(
     (the default compose project network).
     """
     source_line = f"    image: {image}" if image else "    build: ."
-    site_label = caddy_site_label(domain)
+    site_label = caddy_site_label(domain) if domain else ""
     resolved_networks = normalize_ingress_networks(
         ingress_networks or ([ingress_network] if ingress_network else None)
     )
@@ -207,8 +207,8 @@ def render_service_metadata(
 
 def render_service_skill(
     service_name: str,
-    domain: str,
-    port: int,
+    domain: Optional[str] = None,
+    port: int = 8000,
     image: Optional[str] = None,
     ingress_networks: Optional[Sequence[str]] = None,
     exposure_scope: str = "single",
@@ -219,6 +219,7 @@ def render_service_skill(
     normalized_networks = normalize_ingress_networks(ingress_networks)
     image_value = image or f"{service_name}:latest"
     networks_value = ", ".join(normalized_networks)
+    domain_display = domain or "N/A (internal service)"
     route_scope = "Internal only" if internal else "Public ingress"
     route_path = path_prefix or "/"
 
@@ -239,7 +240,7 @@ def render_service_skill(
         ## Service Profile
 
         - Service name: {service_name}
-        - Domain/host: {domain}
+        - Domain/host: {domain_display}
         - Container port: {port}
         - Image default: {image_value}
         - Exposure scope: {route_scope}
@@ -256,7 +257,7 @@ def render_service_skill(
         ## Command Workflow
 
         1. Scaffold or refresh files:
-           `deploy service init -n {service_name} -d {domain}`
+           `deploy service init -n {service_name}{' --internal' if internal else f' -d {domain}'}`
            This creates `Dockerfile`, `docker-compose.yml`, and this skill file.
            The compose file contains all routing and service configuration.
 
@@ -311,8 +312,8 @@ def render_service_skill(
 def write_service_skill(
     project_dir: Path,
     service_name: str,
-    domain: str,
-    port: int,
+    domain: Optional[str] = None,
+    port: int = 8000,
     image: Optional[str] = None,
     ingress_networks: Optional[Sequence[str]] = None,
     exposure_scope: str = "single",

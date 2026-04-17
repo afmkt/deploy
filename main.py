@@ -834,6 +834,9 @@ cli.add_command(proxy, name="proxy")
 cli.add_command(svc, name="svc")
 cli.add_command(monitor)
 
+# Alias for test and programmatic access
+service = svc
+
 
 if __name__ == "__main__":
     cli()

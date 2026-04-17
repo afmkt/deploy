@@ -93,7 +93,7 @@ Run these steps once when introducing a service to a host for the first time.
 Inside the service repository root:
 
 ```sh
-deploy svc init -d api.example.com --image <image:tag>
+deploy svc init --domain api.example.com --image <image:tag>
 ```
 
 This generates:
@@ -198,7 +198,7 @@ via SFTP.
 **Deploy using the transferred image:**
 
 ```sh
-deploy svc init -d api.example.com -i myapp:1.2.3
+deploy svc init --domain api.example.com --image myapp:1.2.3
 deploy svc up --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
@@ -228,11 +228,11 @@ deploy proxy up --network app-a --network app-b
 **Deploy each service on its own network:**
 
 ```sh
-# From the app-a repository (scaffolded with --network app-a -i app-a:latest)
+# From the app-a repository (scaffolded with --network app-a --image app-a:latest)
 deploy image push --image app-a:latest
 deploy svc up
 
-# From the app-b repository (scaffolded with --network app-b -i app-b:latest)
+# From the app-b repository (scaffolded with --network app-b --image app-b:latest)
 deploy image push --image app-b:latest
 deploy svc up
 ```
@@ -246,7 +246,7 @@ A service that must be reachable regardless of how the proxy's network list
 changes can be marked global during `svc init`:
 
 ```sh
-deploy svc init -i shared:latest -d shared.example.com --global
+deploy svc init --image shared:latest --domain shared.example.com --global
 deploy image push --image shared:latest
 deploy svc up
 ```
@@ -271,7 +271,7 @@ the prefix before forwarding, so the upstream service sees a clean path.
 
 ```sh
 # Inside the auth-ui repository
-deploy svc init -d auth.example.com --name auth-ui --image auth-ui:latest
+deploy svc init --domain auth.example.com --name auth-ui --image auth-ui:latest
 deploy image build --tag auth-ui:latest
 deploy svc up --name auth-ui
 ```
@@ -280,7 +280,7 @@ deploy svc up --name auth-ui
 
 ```sh
 # Inside the auth-api repository
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
+deploy svc init --domain auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 deploy image build --tag auth-api:latest
 deploy svc up --name auth-api
 ```
@@ -377,7 +377,7 @@ deploy proxy up --remote localhost
 **Deploy a service locally:**
 
 ```sh
-deploy svc init -d localhost -n myapp --image myapp:latest
+deploy svc init --domain localhost --name myapp --image myapp:latest
 deploy image build --tag myapp:latest --remote localhost
 deploy svc up --remote localhost
 ```

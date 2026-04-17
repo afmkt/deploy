@@ -191,7 +191,7 @@ If old native services are proxied through rewritten host addresses, those servi
 Run inside your service directory:
 
 ```sh
-deploy svc init -d api.example.com --image <image:tag>
+deploy svc init --domain api.example.com --image <image:tag>
 ```
 
 Useful options:
@@ -204,13 +204,13 @@ Useful options:
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --network app-a --image api:latest
+deploy svc init --domain api.example.com --network app-a --image api:latest
 ```
 
 Example with a path prefix (API lives at `/api/auth` on a shared domain):
 
 ```sh
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
+deploy svc init --domain auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 ```
 
 Example for an internal service (no public routing):
@@ -294,7 +294,7 @@ In-network access: http://<service-name>:8000/<path>
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --network app-a --image api:latest
+deploy svc init --domain api.example.com --network app-a --image api:latest
 deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
 deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
@@ -302,7 +302,7 @@ deploy svc up --remote <host> --username <user> --key <ssh_key>
 Example with a globally exposed service:
 
 ```sh
-deploy svc init -d api.example.com --global --image api:latest
+deploy svc init --domain api.example.com --global --image api:latest
 deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
 deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
@@ -315,11 +315,11 @@ prefixed services only handle requests under their path.
 
 ```sh
 # Auth UI — owns the domain root
-deploy svc init -d auth.example.com --name auth-ui --image auth-ui:latest
+deploy svc init --domain auth.example.com --name auth-ui --image auth-ui:latest
 deploy svc up --name auth-ui --remote <host> --username <user> --key <ssh_key>
 
 # Auth API — owns /api/auth/* only; prefix is stripped before forwarding
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
+deploy svc init --domain auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 deploy svc up --name auth-api --remote <host> --username <user> --key <ssh_key>
 ```
 
@@ -349,15 +349,15 @@ Recommended shared-host pattern:
 
 ```sh
 # Set up services with their network and domain
-deploy svc init -n app-a -d a.example.com --network app-a -i <image:a>
-deploy svc init -n app-b -d b.example.com --network app-b -i <image:b>
+deploy svc init --name app-a --domain a.example.com --network app-a --image <image:a>
+deploy svc init --name app-b --domain b.example.com --network app-b --image <image:b>
 
 # Start shared proxy
 deploy proxy up --use-config --network app-a --network app-b
 
 # Deploy services (configuration comes from docker-compose.yml)
-deploy svc up -n app-a --remote <host> --username <user> --key <ssh_key>
-deploy svc up -n app-b --remote <host> --username <user> --key <ssh_key>
+deploy svc up --name app-a --remote <host> --username <user> --key <ssh_key>
+deploy svc up --name app-b --remote <host> --username <user> --key <ssh_key>
 ```
 
 ### Check Service Status
@@ -381,7 +381,7 @@ routing for a different hostname than the current metadata records. Fix it by
 re-running `svc init` with the correct domain and then deploying:
 
 ```sh
-deploy svc init --name <service> -d <correct-host> --image <image_name:tag>
+deploy svc init --name <service> --domain <correct-host> --image <image_name:tag>
 deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
 

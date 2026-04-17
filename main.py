@@ -28,6 +28,16 @@ from deploy.service_deploy_flow import (
     execute_service_deploy,
     persist_service_deploy_resolution,
 )
+from deploy.image_push_flow import (
+    ImagePushArgumentResolver,
+    execute_image_push,
+    persist_image_push_resolution,
+)
+from deploy.image_build_flow import (
+    ImageBuildRemoteArgumentResolver,
+    execute_image_build_remote,
+    persist_image_build_remote_resolution,
+)
 from deploy.session import (
     ConnectionProfile,
     build_connection,
@@ -562,13 +572,6 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
 
 @svc.command(name="up")
 @click.option("--name", "-n", help="Service name (defaults to current directory name)")
-@click.option("--deploy-path", help="Remote deploy base path used by deploy push (for remote build context)")
-@click.option("--rebuild", is_flag=True, default=False,
-              help="Force a rebuild of the image from the remote build context even if the image already exists on the remote host")
-@click.option("--missing-image-action", type=click.Choice(["ask", "push", "build", "abort"]), default="ask", show_default=True,
-              help="Action when image is missing on the remote host")
-@click.option("--auto-sync-context/--no-auto-sync-context", default=True,
-              help="Automatically sync repository context on the remote host before remote build when needed")
 @click.option("--host", "-h", help="Remote server hostname or IP")
 @click.option("--ssh-port", default=22, help="SSH port")
 @click.option("--username", "-u", help="SSH username")
@@ -576,24 +579,19 @@ def service_init(domain, name, port, image, ingress_networks, global_ingress, pa
 @click.option("--password", help="SSH password")
 @click.option("--use-config/--no-use-config", default=True,
               help="Load SSH args from saved config")
-@click.option("--interactive/--no-interactive", default=True,
-              help="Interactive mode")
-def service_up(name, deploy_path, rebuild, missing_image_action, auto_sync_context,
-                   host, ssh_port, username, key, password, use_config, interactive):
-    """Deploy a service image to the remote host and register with ingress.
+def service_up(name, host, ssh_port, username, key, password, use_config):
+    """Deploy a service using an existing Docker image on the remote host.
 
-    Reads scaffolded routing/build intent from local docker-compose.yml.
-    When the image does not exist on the remote host, the command can push or build it.
+    Reads scaffolded routing intent from local docker-compose.yml.
+    Requires the Docker image to already exist on the remote host.
+    
+    Use 'deploy image push' or 'deploy image build-remote' to deliver the image first.
     """
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
         name=name,
-        deploy_path=deploy_path,
-        rebuild=rebuild,
-        missing_image_action=missing_image_action,
-        auto_sync_context=auto_sync_context,
         profile=ConnectionProfile(
             host=host,
             port=ssh_port,
@@ -601,19 +599,12 @@ def service_up(name, deploy_path, rebuild, missing_image_action, auto_sync_conte
             key=key,
             password=password,
         ),
-        interactive=interactive,
     )
     if resolution is None:
         console.print("[red]✗ Host and username are required[/red]")
         sys.exit(1)
 
-    success, connection = execute_service_deploy(
-        resolution.context,
-        console,
-        config=config,
-        push_command=main,
-        docker_push_command=docker_push,
-    )
+    success, connection = execute_service_deploy(resolution.context, console)
     if not success:
         sys.exit(1)
 
@@ -744,6 +735,112 @@ def service_down(name, host, port, username, key, password, use_config):
 
 
 # ---------------------------------------------------------------------------
+# image group - Image delivery operations
+# ---------------------------------------------------------------------------
+
+@click.group()
+def image():
+    """Deliver Docker images to the remote host."""
+    pass
+
+
+@image.command(name="push")
+@click.option("--image", "-i", required=True, help="Docker image (e.g., myapp:latest)")
+@click.option("--platform", help="Docker image platform (e.g., linux/amd64, linux/arm64)")
+@click.option("--registry-username", help="Registry username for private images")
+@click.option("--registry-password", help="Registry password for private images")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--ssh-port", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--interactive/--no-interactive", default=True,
+              help="Interactive mode")
+def image_push(image, platform, registry_username, registry_password,
+               host, ssh_port, username, key, password, use_config, interactive):
+    """Push a pre-built local Docker image to the remote host.
+
+    The image must exist locally (e.g., via `docker build` or `docker pull`).
+    Use this when you want to deploy a pre-built image without building on the remote server.
+    """
+    config = DeployConfig()
+    resolver = ImagePushArgumentResolver(interactive=interactive, use_config=use_config)
+    resolution = resolver.resolve(
+        config,
+        image=image,
+        profile=ConnectionProfile(
+            host=host,
+            port=ssh_port,
+            username=username,
+            key=key,
+            password=password,
+        ),
+        platform=platform,
+        registry_username=registry_username,
+        registry_password=registry_password,
+    )
+    if resolution is None:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    if not execute_image_push(resolution.context, console):
+        sys.exit(1)
+
+    persist_image_push_resolution(config, resolution.context.profile)
+
+
+@image.command(name="build-remote")
+@click.option("--image", "-i", required=True, help="Docker image to build (e.g., myapp:latest)")
+@click.option("--deploy-path", help="Remote deploy base path used by deploy push (for repository working directory)")
+@click.option("--host", "-h", help="Remote server hostname or IP")
+@click.option("--ssh-port", default=22, help="SSH port")
+@click.option("--username", "-u", help="SSH username")
+@click.option("--key", "-k", help="Path to SSH private key")
+@click.option("--password", help="SSH password")
+@click.option("--use-config/--no-use-config", default=True,
+              help="Load SSH args from saved config")
+@click.option("--interactive/--no-interactive", default=True,
+              help="Interactive mode")
+def image_build_remote(image, deploy_path, host, ssh_port, username, key, password, use_config, interactive):
+    """Build a Docker image on the remote host from the current repository.
+
+    Syncs the local Git repository to the remote host and builds the image there.
+    Use this when you want to build on the remote server instead of transferring a pre-built image.
+    """
+    config = DeployConfig()
+    resolver = ImageBuildRemoteArgumentResolver(use_config=use_config)
+    resolution = resolver.resolve(
+        config,
+        image=image,
+        deploy_path=deploy_path,
+        profile=ConnectionProfile(
+            host=host,
+            port=ssh_port,
+            username=username,
+            key=key,
+            password=password,
+        ),
+        interactive=interactive,
+    )
+    if resolution is None:
+        console.print("[red]✗ Host and username are required[/red]")
+        sys.exit(1)
+
+    success, connection = execute_image_build_remote(
+        resolution.context,
+        console,
+        config=config,
+        push_command=main,
+    )
+    if not success:
+        sys.exit(1)
+
+    persist_image_build_remote_resolution(config, resolution.context.profile)
+
+
+# ---------------------------------------------------------------------------
 # monitor command
 # ---------------------------------------------------------------------------
 
@@ -830,6 +927,7 @@ cli.add_command(pull, name="pull")
 cli.add_command(show_config, name="show-config")
 cli.add_command(clear_config, name="clear-config")
 cli.add_command(docker_push, name="docker-push")
+cli.add_command(image, name="image")
 cli.add_command(proxy, name="proxy")
 cli.add_command(svc, name="svc")
 cli.add_command(monitor)

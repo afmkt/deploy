@@ -256,6 +256,20 @@ def test_render_service_metadata_defaults_path_prefix_null():
     metadata = render_service_metadata("mysvc", "api.example.com", 8000)
     assert '"path_prefix": null' in metadata
     assert '"internal": false' in metadata
+    assert '"repo_path": null' in metadata
+    assert '"repo_revision": null' in metadata
+
+
+def test_render_service_metadata_persists_repo_fields():
+    metadata = render_service_metadata(
+        "mysvc",
+        "api.example.com",
+        8000,
+        repo_path="/tmp/deploy/repos/myrepo",
+        repo_revision="abc1234",
+    )
+    assert '"repo_path": "/tmp/deploy/repos/myrepo"' in metadata
+    assert '"repo_revision": "abc1234"' in metadata
 
 
 def test_render_service_skill_contains_profile_and_commands():
@@ -375,7 +389,7 @@ def test_upload_compose_success():
     ssh = DummySSH(responses=[(0, "", "")])
     result = ServiceManager(ssh).upload_compose("mysvc", "version: '3.8'\n")
     assert result is True
-    assert "/tmp/deploy/services/mysvc/docker-compose.yml" in ssh.executed[0]
+    assert "/tmp/deploy/repos/mysvc.service/docker-compose.yml" in ssh.executed[0]
 
 
 def test_upload_compose_failure():
@@ -427,7 +441,7 @@ def test_remove_success():
     assert result is True
     assert "docker compose" in ssh.executed[0]
     assert " down" in ssh.executed[0]
-    assert ssh.executed[1] == "rm -rf /tmp/deploy/services/mysvc"
+    assert ssh.executed[1] == "rm -rf /tmp/deploy/repos/mysvc.service"
 
 
 def test_remove_stops_on_compose_down_failure():
@@ -508,6 +522,20 @@ def test_get_logs():
     logs = ServiceManager(ssh).get_logs("mysvc", lines=15)
     assert logs == "hello\n"
     assert "--tail 15" in ssh.executed[0]
+
+
+def test_get_repo_details_found():
+    ssh = DummySSH(
+        responses=[
+            (0, '{"repo_revision":"abc1234","repo_path":"/tmp/deploy/repos/myrepo"}', ""),
+        ]
+    )
+    assert ServiceManager(ssh).get_repo_details("mysvc") == ("abc1234", "/tmp/deploy/repos/myrepo")
+
+
+def test_get_repo_details_missing_metadata_file():
+    ssh = DummySSH(responses=[(1, "", "not found")])
+    assert ServiceManager(ssh).get_repo_details("mysvc") == (None, None)
 
 
 def test_list_services_success():

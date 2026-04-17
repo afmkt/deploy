@@ -4,7 +4,7 @@ import shlex
 from typing import Optional
 from rich.console import Console
 from .ssh import SSHConnection
-from .paths import REPOS_DIR
+from .paths import REPOS_DIR, get_bare_repo_path, get_work_dir_path
 
 console = Console()
 
@@ -167,7 +167,7 @@ class RemoteServer:
         Returns:
             Full path to the bare repository
         """
-        return f"{self.deploy_path}/{repo_name}.git"
+        return get_bare_repo_path(repo_name, self.deploy_path)
 
     def get_working_dir_path(self, repo_name: str) -> str:
         """Get the full path for a working directory.
@@ -178,7 +178,7 @@ class RemoteServer:
         Returns:
             Full path to the working directory
         """
-        return f"{self.deploy_path}/{repo_name}"
+        return get_work_dir_path(repo_name, self.deploy_path)
 
     def get_remote_revision(self, working_dir_path: str) -> Optional[str]:
         """Get the current commit revision from remote working directory.

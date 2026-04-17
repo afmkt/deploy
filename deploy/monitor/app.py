@@ -182,7 +182,7 @@ class MonitorApp(App):
 
     def on_mount(self) -> None:
         services = self.query_one("#services-table", DataTable)
-        services.add_columns("Service", "Status")
+        services.add_columns("Service", "Status", "Repo revision", "Repo path")
         services.cursor_type = "row"
 
         networks = self.query_one("#networks-table", DataTable)
@@ -230,7 +230,13 @@ class MonitorApp(App):
         cursor_column = services_table.cursor_column or 0
         services_table.clear(columns=False)
         for svc in self.snapshot.services:
-            services_table.add_row(svc.name, svc.status, key=svc.name)
+            services_table.add_row(
+                svc.name,
+                svc.status,
+                svc.repo_revision,
+                svc.repo_path,
+                key=svc.name,
+            )
 
         service_names = {svc.name for svc in self.snapshot.services}
         if self.selected_service not in service_names:

@@ -11,7 +11,7 @@ from rich.console import Console
 
 from .ssh import SSHConnection
 from .ingress import INGRESS_NETWORK, normalize_ingress_networks
-from .paths import SERVICES_DIR
+from .paths import REPOS_DIR, get_service_dir_path
 
 console = Console()
 
@@ -190,6 +190,8 @@ def render_service_metadata(
     exposure_scope: str = "single",
     path_prefix: Optional[str] = None,
     internal: bool = False,
+    repo_revision: Optional[str] = None,
+    repo_path: Optional[str] = None,
 ) -> str:
     """Render persisted metadata for a deployed service."""
     payload = {
@@ -201,6 +203,8 @@ def render_service_metadata(
         "exposure_scope": exposure_scope,
         "path_prefix": path_prefix,
         "internal": internal,
+        "repo_revision": repo_revision,
+        "repo_path": repo_path,
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -300,7 +304,7 @@ def render_service_skill(
 
         ## Operational Guidance
 
-        - `deploy service deploy` persists remote runtime metadata at `{SERVICES_DIR}/{service_name}/.deploy-service.json`.
+        - `deploy service deploy` persists remote runtime metadata at `/tmp/deploy/repos/{service_name}.service/.deploy-service.json`.
         - Update routing by editing `docker-compose.yml` or re-running `service init`.
         - Use `--rebuild` on `deploy service deploy` after dependency or base-image changes.
         - Use `deploy service down -n {service_name}` to stop without deleting remote metadata.
@@ -345,7 +349,7 @@ def write_service_skill(
 class ServiceManager:
     """Manages remote deployment lifecycle for a single service."""
 
-    def __init__(self, ssh: SSHConnection, remote_base: str = SERVICES_DIR):
+    def __init__(self, ssh: SSHConnection, remote_base: str = REPOS_DIR):
         self.ssh = ssh
         self.remote_base = remote_base
 
@@ -354,7 +358,7 @@ class ServiceManager:
         return shlex.quote(value)
 
     def _service_dir(self, service_name: str) -> str:
-        return f"{self.remote_base}/{service_name}"
+        return get_service_dir_path(service_name, self.remote_base)
 
     def _service_metadata_path(self, service_name: str) -> str:
         return f"{self._service_dir(service_name)}/.deploy-service.json"
@@ -453,6 +457,24 @@ class ServiceManager:
         except json.JSONDecodeError:
             console.print(f"[yellow]⚠ Invalid service metadata for '{service_name}'[/yellow]")
             return None
+
+    @staticmethod
+    def _read_optional_metadata_str(metadata: dict, key: str) -> Optional[str]:
+        """Return a trimmed metadata string value, if present and non-empty."""
+        value = metadata.get(key)
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    def get_repo_details(self, service_name: str) -> tuple[Optional[str], Optional[str]]:
+        """Return persisted repo revision and repo path for a service, if available."""
+        metadata = self.read_service_metadata(service_name)
+        if not metadata:
+            return None, None
+        revision = self._read_optional_metadata_str(metadata, "repo_revision")
+        path = self._read_optional_metadata_str(metadata, "repo_path")
+        return revision, path
 
     def compose_up(self, service_name: str) -> bool:
         """Start the service via docker compose."""

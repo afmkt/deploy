@@ -40,6 +40,11 @@ class FakeServiceManager:
     def get_status(self, name):
         return "running" if name == "api" else "exited"
 
+    def get_repo_details(self, name):
+        if name == "api":
+            return "abc1234", "/tmp/deploy/repos/myrepo"
+        return None, None
+
 
 def test_collect_connection_failure():
     collector = MonitorCollector(
@@ -84,6 +89,8 @@ def test_collect_success():
     assert snapshot.proxy_status == "running"
     assert [svc.name for svc in snapshot.services] == ["api", "worker"]
     assert [svc.status for svc in snapshot.services] == ["running", "exited"]
+    assert [svc.repo_revision for svc in snapshot.services] == ["abc1234", "n/a"]
+    assert [svc.repo_path for svc in snapshot.services] == ["/tmp/deploy/repos/myrepo", "n/a"]
     assert snapshot.networks == ["bridge", "ingress"]
     assert snapshot.resources.docker_containers == 4
     assert snapshot.resources.docker_images == 7

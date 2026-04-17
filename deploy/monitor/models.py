@@ -15,6 +15,8 @@ class ServiceState:
 
     name: str
     status: str = "unknown"
+    repo_revision: str = "n/a"
+    repo_path: str = "n/a"
 
 
 @dataclass

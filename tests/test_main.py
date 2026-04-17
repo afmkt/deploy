@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from main import main
 from main import proxy
 from main import service
+from main import image
 import main as main_module
 
 
@@ -284,25 +285,11 @@ def test_service_deploy_persists_args_only_after_success(monkeypatch):
             return SimpleNamespace(
                 context=SimpleNamespace(
                     service_name="myapp",
-                    image="myapp:latest",
-                    domain="example.com",
-                    port=8000,
-                    deploy_path=None,
-                    use_config=False,
-                    rebuild=False,
-                    allow_remote_domain_fallback=False,
-                    missing_image_action="ask",
-                    auto_sync_context=True,
-                    ingress_networks=("ingress",),
-                    global_ingress=False,
-                    path_prefix=None,
-                    internal=False,
                     profile=kwargs["profile"],
-                    interactive=kwargs["interactive"],
                 )
             )
 
-    def fake_execute(context, console, *, config, push_command, docker_push_command):
+    def fake_execute(context, console):
         return True, SimpleNamespace(host="localhost", port=22, username="tester", key_filename=None)
 
     def fake_persist(config, connection):
@@ -317,7 +304,6 @@ def test_service_deploy_persists_args_only_after_success(monkeypatch):
         "--host", "localhost",
         "--username", "tester",
         "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 0
@@ -336,25 +322,11 @@ def test_service_deploy_does_not_persist_when_execution_fails(monkeypatch):
             return SimpleNamespace(
                 context=SimpleNamespace(
                     service_name="myapp",
-                    image="myapp:latest",
-                    domain="example.com",
-                    port=8000,
-                    deploy_path=None,
-                    use_config=False,
-                    rebuild=False,
-                    allow_remote_domain_fallback=False,
-                    missing_image_action="ask",
-                    auto_sync_context=True,
-                    ingress_networks=("ingress",),
-                    global_ingress=False,
-                    path_prefix=None,
-                    internal=False,
                     profile=kwargs["profile"],
-                    interactive=kwargs["interactive"],
                 )
             )
 
-    def fake_execute(context, console, *, config, push_command, docker_push_command):
+    def fake_execute(context, console):
         return False, None
 
     def fake_persist(config, connection):
@@ -369,7 +341,6 @@ def test_service_deploy_does_not_persist_when_execution_fails(monkeypatch):
         "--host", "localhost",
         "--username", "tester",
         "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 1
@@ -476,9 +447,6 @@ def test_service_init_exits_when_execution_fails(monkeypatch):
 
 def test_service_deploy_local_auto_push_stays_local(monkeypatch):
     runner = CliRunner()
-    nested = {}
-    original_invoke = CliRunner.invoke
-
     class FakeConnection:
         is_local = True
 
@@ -511,6 +479,9 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
         def image_exists_remote(self, image):
             return False
 
+        def get_repo_details(self, service_name):
+            return None
+
         def ensure_service_dir(self, service_name):
             return True
 
@@ -529,24 +500,9 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
         def get_container_ip(self, service_name):
             return None
 
-    class FakeResult:
-        exit_code = 0
-
-    def fake_build_connection_from_config(*args, **kwargs):
-        return FakeConnection()
-
-    def fake_invoke(self, command, args, **kwargs):
-        if command is main_module.docker_push:
-            nested["command"] = command
-            nested["args"] = list(args)
-            return FakeResult()
-        return original_invoke(self, command, args, **kwargs)
-
     monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
     monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
     monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: "push")
-    monkeypatch.setattr("click.testing.CliRunner.invoke", fake_invoke)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
 
@@ -559,117 +515,60 @@ def test_service_deploy_local_auto_push_stays_local(monkeypatch):
             "--no-use-config",
         ])
 
-    assert result.exit_code == 0
-    assert nested["command"] is main_module.docker_push
-    assert "--host" in nested["args"]
-    assert "localhost" in nested["args"]
-    assert "--username" not in nested["args"]
+    assert result.exit_code == 1
+    assert "Image 'repo/app:latest' not found on remote host" in result.output
+    assert "Use: deploy image push repo/app:latest" in result.output
+    assert "Or : deploy image build-remote" in result.output
 
 
 def test_service_deploy_remote_build_on_missing_image(monkeypatch):
-    """When the image is missing and the user selects 'build', the remote build path is used."""
+    """image build-remote delegates to the dedicated flow and persists args on success."""
     runner = CliRunner()
     calls = {}
 
-    class FakeConnection:
-        is_local = True
-
-        def __init__(self):
-            self.host = "local"
-            self.port = 0
-            self.username = "tester"
-            self.key_filename = None
-
-        def connect(self):
-            return True
-
-        def disconnect(self):
+    class FakeResolver:
+        def __init__(self, **kwargs):
             pass
 
-    class FakeProxyManager:
-        def __init__(self, ssh):
-            pass
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    image=kwargs["image"],
+                    deploy_path=kwargs["deploy_path"],
+                    profile=kwargs["profile"],
+                    interactive=kwargs["interactive"],
+                    use_config=False,
+                )
+            )
 
-        def is_running(self):
-            return True
+    def fake_execute(context, console, *, config, push_command):
+        calls["image"] = context.image
+        calls["deploy_path"] = context.deploy_path
+        calls["push_command"] = push_command
+        return True, SimpleNamespace(host="localhost", port=22, username="tester", key_filename=None)
 
-        def get_configured_ingress_networks(self):
-            return ["ingress"]
+    def fake_persist(config, profile):
+        calls["persisted_host"] = profile.host
 
-    class FakeServiceManager:
-        def __init__(self, ssh):
-            pass
+    monkeypatch.setattr(main_module, "ImageBuildRemoteArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_image_build_remote", fake_execute)
+    monkeypatch.setattr(main_module, "persist_image_build_remote_resolution", fake_persist)
 
-        def image_exists_remote(self, image):
-            return False
-
-        def context_is_git_repo(self, context_path):
-            calls["context_path"] = context_path
-            return True
-
-        def get_context_revision(self, context_path):
-            return "abc123"
-
-        def build_image_from_context(self, image, context_path):
-            calls["build_image_from_context"] = (image, context_path)
-            return True
-
-        def read_service_metadata(self, service_name):
-            return None
-
-        def ensure_service_dir(self, service_name):
-            return True
-
-        def upload_compose(self, service_name, compose_content):
-            return True
-
-        def upload_metadata(self, service_name, metadata_content):
-            return True
-
-        def compose_up(self, service_name):
-            return True
-
-        def get_status(self, service_name):
-            return "running"
-
-        def get_container_ip(self, service_name):
-            return None
-
-    class FakeGitRepository:
-        def __init__(self, path):
-            pass
-
-        def validate(self):
-            return True
-
-        def get_repo_name(self):
-            return "myrepo"
-
-        def get_current_revision(self):
-            return "abc123"
-
-    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *a, **kw: FakeConnection())
-    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
-    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
-    monkeypatch.setattr("deploy.service_deploy_flow.GitRepository", FakeGitRepository)
-    monkeypatch.setattr("rich.prompt.Prompt.ask", lambda *args, **kwargs: "build")
-    monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
-    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
-
-    with runner.isolated_filesystem():
-        _write_service_compose("repo/app:latest")
-
-        result = runner.invoke(service, [
-            "up",
-            "--host", "localhost",
-            "--deploy-path", "/tmp/deploy/repos",
-            "--no-use-config",
-        ])
+    result = runner.invoke(image, [
+        "build-remote",
+        "--image", "repo/app:latest",
+        "--deploy-path", "/tmp/deploy/repos",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+    ])
 
     assert result.exit_code == 0
-    assert "build_image_from_context" in calls
-    assert calls["build_image_from_context"][0] == "repo/app:latest"
-    assert calls["build_image_from_context"][1] == "/tmp/deploy/repos/myrepo"
+    assert calls["image"] == "repo/app:latest"
+    assert calls["deploy_path"] == "/tmp/deploy/repos"
+    assert calls["push_command"] is main_module.main
+    assert calls["persisted_host"] == "localhost"
 
 
 def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(monkeypatch):
@@ -702,14 +601,11 @@ def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(mon
         def __init__(self, ssh):
             pass
 
-        def read_service_metadata(self, service_name):
-            return None
-
-        def get_deployed_image(self, service_name):
-            return None
-
         def image_exists_remote(self, image):
             return False
+
+        def get_repo_details(self, service_name):
+            return None
 
     monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *args, **kwargs: FakeConnection())
     monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
@@ -724,68 +620,53 @@ def test_service_deploy_non_interactive_defaults_to_build_when_image_missing(mon
             "up",
             "--host", "localhost",
             "--no-use-config",
-            "--no-interactive",
         ])
 
     assert result.exit_code == 1
-    assert "Deploy path is required for remote build context in non-interactive mode" in result.output
+    assert "Image 'repo/app:latest' not found on remote host" in result.output
+    assert "Use: deploy image push repo/app:latest" in result.output
+    assert "Or : deploy image build-remote" in result.output
 
 
 def test_service_deploy_non_interactive_build_requires_deploy_path(monkeypatch):
     runner = CliRunner()
+    calls = {}
 
-    class FakeConnection:
-        is_local = True
-        host = "local"
-        port = 0
-        username = "tester"
-        key_filename = None
-
-        def connect(self):
-            return True
-
-        def disconnect(self):
+    class FakeResolver:
+        def __init__(self, **kwargs):
             pass
 
-    class FakeProxyManager:
-        def __init__(self, ssh):
-            pass
+        def resolve(self, config, **kwargs):
+            return SimpleNamespace(
+                context=SimpleNamespace(
+                    image=kwargs["image"],
+                    deploy_path=kwargs["deploy_path"],
+                    profile=kwargs["profile"],
+                    interactive=kwargs["interactive"],
+                    use_config=False,
+                )
+            )
 
-        def is_running(self):
-            return True
+    def fake_execute(context, console, *, config, push_command):
+        calls["deploy_path"] = context.deploy_path
+        calls["interactive"] = context.interactive
+        return False, None
 
-        def get_configured_ingress_networks(self):
-            return ["ingress"]
+    monkeypatch.setattr(main_module, "ImageBuildRemoteArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_image_build_remote", fake_execute)
 
-    class FakeServiceManager:
-        def __init__(self, ssh):
-            pass
-
-        def image_exists_remote(self, image):
-            return False
-
-        def read_service_metadata(self, service_name):
-            return None
-
-    monkeypatch.setattr("deploy.service_deploy_flow.build_connection", lambda *args, **kwargs: FakeConnection())
-    monkeypatch.setattr("deploy.service_deploy_flow.ProxyManager", FakeProxyManager)
-    monkeypatch.setattr("deploy.service_deploy_flow.ServiceManager", FakeServiceManager)
-    monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
-    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda *args, **kwargs: {})
-
-    with runner.isolated_filesystem():
-        _write_service_compose("repo/app:latest")
-
-        result = runner.invoke(service, [
-            "up",
-            "--host", "localhost",
-            "--no-use-config",
-            "--no-interactive",
-            "--missing-image-action", "build",
-        ])
+    result = runner.invoke(image, [
+        "build-remote",
+        "--image", "repo/app:latest",
+        "--host", "localhost",
+        "--username", "tester",
+        "--no-use-config",
+        "--no-interactive",
+    ])
 
     assert result.exit_code == 1
-    assert "Deploy path is required for remote build context in non-interactive mode" in result.output
+    assert calls["deploy_path"] is None
+    assert calls["interactive"] is False
 
 
 def test_build_connection_uses_local_for_localhost_host():
@@ -1289,7 +1170,6 @@ def test_service_deploy_requires_local_compose_non_interactive(monkeypatch, tmp_
     result = runner.invoke(service, [
         "up",
         "--host", "localhost", "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 1, result.output
@@ -1332,6 +1212,9 @@ def test_service_deploy_uses_local_compose_for_routing(monkeypatch, tmp_path):
         def image_exists_remote(self, image):
             return True
 
+        def get_repo_details(self, service_name):
+            return None
+
         def ensure_service_dir(self, service_name):
             return True
 
@@ -1361,7 +1244,6 @@ def test_service_deploy_uses_local_compose_for_routing(monkeypatch, tmp_path):
     result = runner.invoke(service, [
         "up",
         "--host", "localhost", "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 0, result.output

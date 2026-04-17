@@ -78,10 +78,19 @@ class MonitorCollector:
             snapshot.proxy_status = proxy_mgr.get_status() or "not-found"
 
             service_names = service_mgr.list_services()
-            snapshot.services = [
-                ServiceState(name=name, status=(service_mgr.get_status(name) or "not-found"))
-                for name in sorted(service_names)
-            ]
+            services: list[ServiceState] = []
+            for name in sorted(service_names):
+                status = service_mgr.get_status(name) or "not-found"
+                repo_revision, repo_path = service_mgr.get_repo_details(name)
+                services.append(
+                    ServiceState(
+                        name=name,
+                        status=status,
+                        repo_revision=repo_revision or "n/a",
+                        repo_path=repo_path or "n/a",
+                    )
+                )
+            snapshot.services = services
 
             networks_text = self._read_text(
                 ssh,

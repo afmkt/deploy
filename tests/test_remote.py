@@ -44,4 +44,4 @@ def test_remote_server_get_paths():
     ssh = DummySSH()
     remote = RemoteServer(ssh, "/deploy")
     assert remote.get_bare_repo_path("repo") == "/deploy/repo.git"
-    assert remote.get_working_dir_path("repo") == "/deploy/repo"
+    assert remote.get_working_dir_path("repo") == "/deploy/repo.work"

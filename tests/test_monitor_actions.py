@@ -42,6 +42,9 @@ class FakeServiceManager:
     def compose_down(self, name):
         return name == "api"
 
+    def remove(self, name):
+        return name == "api"
+
     def restart(self, name):
         return name == "api"
 
@@ -94,6 +97,22 @@ def test_action_runner_service_restart():
     result = runner.run("service_restart", target="api")
     assert result.ok is True
     assert "restarted" in result.message
+
+
+def test_action_runner_service_remove():
+    runner = ActionRunner(
+        host="example.com",
+        port=22,
+        username="root",
+        key_filename=None,
+        password=None,
+        ssh_factory=lambda **_: FakeSSH(),
+        proxy_manager_factory=FakeProxyManager,
+        service_manager_factory=FakeServiceManager,
+    )
+    result = runner.run("service_remove", target="api")
+    assert result.ok is True
+    assert "removed" in result.message
 
 
 def test_action_runner_network_create_failure():

@@ -113,6 +113,7 @@ class MonitorApp(App):
         Binding("d", "proxy_down", "Proxy Down"),
         Binding("s", "service_up", "Service Up"),
         Binding("x", "service_down", "Service Down"),
+        Binding("z", "service_remove", "Service Remove"),
         Binding("t", "service_restart", "Service Restart"),
         Binding("n", "network_create", "Create Network"),
         Binding("l", "logs", "Fetch Logs"),
@@ -225,12 +226,28 @@ class MonitorApp(App):
         )
 
         services_table = self.query_one("#services-table", DataTable)
+        services_table_had_focus = self.focused is services_table
+        cursor_column = services_table.cursor_column or 0
         services_table.clear(columns=False)
         for svc in self.snapshot.services:
             services_table.add_row(svc.name, svc.status, key=svc.name)
 
+        service_names = {svc.name for svc in self.snapshot.services}
+        if self.selected_service not in service_names:
+            self.selected_service = ""
+
         if not self.selected_service and self.snapshot.services:
             self.selected_service = self.snapshot.services[0].name
+
+        if self.selected_service:
+            try:
+                selected_row = services_table.get_row_index(self.selected_service)
+                services_table.move_cursor(row=selected_row, column=cursor_column, animate=False)
+            except KeyError:
+                pass
+
+        if services_table_had_focus:
+            self.set_focus(services_table)
 
         networks_table = self.query_one("#networks-table", DataTable)
         networks_table.clear(columns=False)
@@ -341,6 +358,25 @@ class MonitorApp(App):
 
         self.push_screen(
             ConfirmScreen("Confirm service restart", f"Restart service '{service_name}' now?"),
+            handle_confirm,
+        )
+
+    def action_service_remove(self) -> None:
+        if not self.selected_service:
+            self.notify("No service selected", severity="warning")
+            return
+
+        service_name = self.selected_service
+
+        def handle_confirm(confirmed: bool | None) -> None:
+            if confirmed:
+                self.run_worker(self._run_action("service_remove", target=service_name), group="actions")
+
+        self.push_screen(
+            ConfirmScreen(
+                "Confirm service removal",
+                f"Stop and remove service '{service_name}' and delete its remote deployment files?",
+            ),
             handle_confirm,
         )
 

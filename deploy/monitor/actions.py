@@ -52,7 +52,7 @@ class ActionRunner:
 
     def run(self, action: str, target: str = "", value: str = "") -> ActionResult:
         """Run one action with optional target and value payloads."""
-        if action in {"service_up", "service_down", "service_restart", "service_logs"} and not target.strip():
+        if action in {"service_up", "service_down", "service_remove", "service_restart", "service_logs"} and not target.strip():
             return ActionResult(ok=False, action=action, message="Service name is required")
 
         if action == "network_create" and not value.strip():
@@ -82,6 +82,10 @@ class ActionRunner:
                 if action == "service_down":
                     ok = service_mgr.compose_down(target)
                     return ActionResult(ok=ok, action=action, message=f"Service {target} stopped" if ok else f"Service {target} stop failed")
+
+                if action == "service_remove":
+                    ok = service_mgr.remove(target)
+                    return ActionResult(ok=ok, action=action, message=f"Service {target} removed" if ok else f"Service {target} removal failed")
 
                 if action == "service_restart":
                     ok = service_mgr.restart(target)

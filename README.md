@@ -411,6 +411,7 @@ Keybindings:
 - `d`: proxy down
 - `s`: start selected service
 - `x`: stop selected service
+- `z`: stop and remove selected service deployment
 - `t`: restart selected service
 - `n`: create Docker network
 - `l`: fetch logs for selected service (or proxy if no service is selected)

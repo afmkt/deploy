@@ -479,6 +479,7 @@ deploy monitor --use-config
 | `d` | Proxy down |
 | `s` | Start selected service |
 | `x` | Stop selected service |
+| `z` | Stop and remove selected service deployment |
 | `t` | Restart selected service |
 | `n` | Create Docker network |
 | `l` | Fetch logs (selected service, or proxy if none selected) |

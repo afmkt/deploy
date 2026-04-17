@@ -421,6 +421,28 @@ def test_compose_down_failure():
     assert result is False
 
 
+def test_remove_success():
+    ssh = DummySSH(responses=[(0, "", ""), (0, "", "")])
+    result = ServiceManager(ssh).remove("mysvc")
+    assert result is True
+    assert "docker compose" in ssh.executed[0]
+    assert " down" in ssh.executed[0]
+    assert ssh.executed[1] == "rm -rf /tmp/deploy/services/mysvc"
+
+
+def test_remove_stops_on_compose_down_failure():
+    ssh = DummySSH(responses=[(1, "", "error")])
+    result = ServiceManager(ssh).remove("mysvc")
+    assert result is False
+    assert len(ssh.executed) == 1
+
+
+def test_remove_failure_when_directory_delete_fails():
+    ssh = DummySSH(responses=[(0, "", ""), (1, "", "permission denied")])
+    result = ServiceManager(ssh).remove("mysvc")
+    assert result is False
+
+
 # ---------------------------------------------------------------------------
 # ServiceManager.get_status / get_container_ip
 # ---------------------------------------------------------------------------

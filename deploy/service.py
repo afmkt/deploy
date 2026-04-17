@@ -358,6 +358,13 @@ class ServiceManager:
     def _service_metadata_path(self, service_name: str) -> str:
         return f"{self._service_dir(service_name)}/.deploy-service.json"
 
+    def _compose_command(self, service_name: str, args: str) -> tuple[int, str, str]:
+        """Run a docker compose command for a deployed service."""
+        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
+        return self.ssh.execute(
+            f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} {args}"
+        )
+
     def image_exists_remote(self, image: str) -> bool:
         """Check whether a Docker image is available on the remote host."""
         exit_code, _, _ = self.ssh.execute(
@@ -448,12 +455,8 @@ class ServiceManager:
 
     def compose_up(self, service_name: str) -> bool:
         """Start the service via docker compose."""
-        remote_dir = self._service_dir(service_name)
-        compose_file = f"{remote_dir}/docker-compose.yml"
         console.print(f"[blue]Starting service '{service_name}'...[/blue]")
-        exit_code, stdout, stderr = self.ssh.execute(
-            f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} up -d --pull never"
-        )
+        exit_code, _, stderr = self._compose_command(service_name, "up -d --pull never")
         if exit_code != 0:
             console.print(f"[red]✗ docker compose up failed: {stderr.strip()}[/red]")
             return False
@@ -462,15 +465,26 @@ class ServiceManager:
 
     def compose_down(self, service_name: str) -> bool:
         """Stop and remove the remote service containers."""
-        remote_dir = self._service_dir(service_name)
-        compose_file = f"{remote_dir}/docker-compose.yml"
-        exit_code, _, stderr = self.ssh.execute(
-            f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} down"
-        )
+        exit_code, _, stderr = self._compose_command(service_name, "down")
         if exit_code != 0:
             console.print(f"[red]✗ docker compose down failed: {stderr.strip()}[/red]")
             return False
         console.print(f"[green]✓ Service '{service_name}' stopped[/green]")
+        return True
+
+    def remove(self, service_name: str) -> bool:
+        """Stop the service and remove its deployed files from the target host."""
+        console.print(f"[blue]Removing service '{service_name}'...[/blue]")
+        if not self.compose_down(service_name):
+            return False
+
+        remote_dir = self._service_dir(service_name)
+        exit_code, _, stderr = self.ssh.execute(f"rm -rf {self._q(remote_dir)}")
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to remove service directory: {stderr.strip()}[/red]")
+            return False
+
+        console.print(f"[green]✓ Service '{service_name}' removed[/green]")
         return True
 
     def restart(self, service_name: str) -> bool:

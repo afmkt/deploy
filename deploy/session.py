@@ -206,7 +206,7 @@ def load_defaulted_value(current: Any, default: Any, saved_args: Mapping[str, An
 
 ALL_FALLBACK_SOURCES: tuple[str, ...] = (
     "repo.push", "repo.pull", "image.push", "image.build",
-    "proxy.up", "svc.up", "monitor._",
+    "proxy.up", "svc.up",
 )
 
 

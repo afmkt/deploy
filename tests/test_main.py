@@ -37,7 +37,7 @@ def test_repo_push_persists_only_after_success(monkeypatch):
                 ),
             )
 
-    def fake_execute(context, console, *, dry_run=False):
+    def fake_execute(context, console):
         return True
 
     def fake_persist(config, context):

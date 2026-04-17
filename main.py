@@ -154,7 +154,6 @@ def repo() -> None:
 @with_connection_options()
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
-@click.option("--dry-run", is_flag=True, help="Validate connection and arguments without pushing.")
 @click.pass_context
 def repo_push(
     ctx: click.Context,
@@ -166,7 +165,6 @@ def repo_push(
     deploy_path: str,
     repo_path: str,
     use_config: bool,
-    dry_run: bool,
 ) -> None:
     _print_banner("Git SSH Deploy Tool", "Sync local Git repository to a remote repository")
 
@@ -189,7 +187,7 @@ def repo_push(
         console.print("[red]✗ Username is required for remote connections[/red]")
         sys.exit(1)
 
-    success = execute_push(resolution.context, console, dry_run=dry_run)
+    success = execute_push(resolution.context, console)
     if not success:
         sys.exit(1)
 
@@ -202,7 +200,6 @@ def repo_push(
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
 @click.option("--branch", help="Branch name to pull to.")
-@click.option("--dry-run", is_flag=True, help="Validate connection and arguments without pulling.")
 @click.pass_context
 def repo_pull(
     ctx: click.Context,
@@ -215,7 +212,6 @@ def repo_pull(
     repo_path: str,
     branch: str | None,
     use_config: bool,
-    dry_run: bool,
 ) -> None:
     _print_banner("Git SSH Deploy Tool", "Pull changes from a remote repository")
 
@@ -239,7 +235,7 @@ def repo_pull(
         console.print("[red]✗ Username is required for remote connections[/red]")
         sys.exit(1)
 
-    success = execute_pull(resolution.context, console, dry_run=dry_run)
+    success = execute_pull(resolution.context, console)
     if not success:
         sys.exit(1)
 
@@ -491,7 +487,6 @@ def image() -> None:
 @click.option("--registry-username", help="Registry username for private images.")
 @click.option("--registry-password", help="Registry password for private images.")
 @with_connection_options()
-@click.option("--dry-run", is_flag=True, help="Validate the transfer without sending the image.")
 @click.pass_context
 def image_push(
     ctx: click.Context,
@@ -505,7 +500,6 @@ def image_push(
     key: str | None,
     password: str | None,
     use_config: bool,
-    dry_run: bool,
 ) -> None:
     config = DeployConfig()
     resolver = ImagePushArgumentResolver(interactive=_interactive(ctx), use_config=use_config)
@@ -521,7 +515,7 @@ def image_push(
         console.print("[red]✗ Remote and username are required[/red]")
         sys.exit(1)
 
-    if not execute_image_push(resolution.context, console, dry_run=dry_run):
+    if not execute_image_push(resolution.context, console):
         sys.exit(1)
 
     persist_image_push_resolution(config, resolution.context.profile)

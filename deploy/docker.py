@@ -164,6 +164,19 @@ class DockerManager:
     # Local: pull and save
     # ------------------------------------------------------------------
 
+    def image_exists_locally(self, image: str) -> bool:
+        """Return True when a local image reference can be inspected."""
+        try:
+            result = subprocess.run(
+                ["docker", "image", "inspect", image],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0
+        except FileNotFoundError:
+            console.print("[red]✗ Docker not found locally; is Docker installed and in PATH?[/red]")
+            return False
+
     def registry_login(self, registry_username: str, registry_password: str, image: str) -> bool:
         """Log in to a Docker registry using password via stdin (avoids shell history)."""
         first_component = image.split("/")[0]
@@ -264,6 +277,60 @@ class DockerManager:
         except FileNotFoundError:
             console.print("[red]✗ Docker not found locally[/red]")
             return False
+
+    def save_image_to_file(
+        self,
+        image: str,
+        safe_filename: str,
+        platform: Optional[str] = None,
+        registry_username: Optional[str] = None,
+        registry_password: Optional[str] = None,
+    ) -> bool:
+        """Prepare a local tarball for transfer, pulling when needed.
+
+        Platform selection defaults to the detected target architecture.
+        Registry login is only attempted when explicit credentials are provided.
+        """
+        local_tar_path = f"/tmp/{safe_filename}"
+        effective_platform = platform or self.detect_remote_arch()
+
+        if not self.image_exists_locally(image):
+            if not effective_platform:
+                console.print("[red]✗ Could not resolve a target platform for pull/save[/red]")
+                return False
+
+            console.print(
+                f"[yellow]Local image '{image}' not found. Pulling for {effective_platform}...[/yellow]"
+            )
+            if registry_username and registry_password:
+                if not self.registry_login(registry_username, registry_password, image):
+                    return False
+
+            if not self.pull_image(image, effective_platform):
+                return False
+            return self.save_image(image, local_tar_path, effective_platform)
+
+        console.print(f"[green]✓ Image '{image}' found locally[/green]")
+        return self.save_image(image, local_tar_path, effective_platform)
+
+    def upload_and_load_image(self, safe_filename: str, *, image_tag: Optional[str] = None) -> bool:
+        """Transfer tarball to target, docker-load it, and clean up temporary files."""
+        local_tar_path = f"/tmp/{safe_filename}"
+        remote_tar_path = f"/tmp/{safe_filename}"
+
+        if not Path(local_tar_path).exists():
+            console.print(f"[red]✗ Missing local tarball: {local_tar_path}[/red]")
+            return False
+
+        try:
+            if not self.transfer_tarball(local_tar_path, remote_tar_path):
+                return False
+            if not self.load_image(remote_tar_path, image_tag):
+                return False
+            return True
+        finally:
+            self.cleanup_remote(remote_tar_path)
+            Path(local_tar_path).unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Transfer via SFTP

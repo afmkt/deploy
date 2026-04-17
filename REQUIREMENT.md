@@ -100,6 +100,8 @@ deploy image push --image <image_name:tag> --remote <host> --username <user> --k
 - This command will use `docker save -o ...` to package the image to a tar ball
 - Send the tar ball to remote via ssh
 - Load the tar ball at the remote machine by `docker load -i ...`
+- `--platform` is optional; when omitted, infer from target architecture automatically
+- `--registry-username` and `--registry-password` are optional; only used when a local pull is needed and explicit registry login is required
 
 Notes:
 
@@ -182,6 +184,7 @@ Useful options:
 - `--network <name>`: External network that this service joins for caddy routing (default: `ingress`).
 - `--global`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
 - `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain (e.g. `/api/auth`). Allows multiple services to share one domain via path-based routing.
+- `--force`: Regenerate `Dockerfile`, `docker-compose.yml`, and `.github/skills/deploy-service/SKILL.md` even if files already exist. Without `--force`, existing files are preserved and not overwritten.
 - When `--domain` is not specified, the service as internal-only — no Caddy labels, no ingress network. The container is reachable only by other containers on the same Docker network.
 
 Example with isolated app network:
@@ -332,6 +335,16 @@ re-running `svc init` with the correct domain and then deploying:
 deploy svc init --name <service> --domain <correct-host> --image <image_name:tag>
 deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
+
+
+### Stop A Service
+
+```sh
+deploy svc down --name <service> --remote <host> --username <user> --key <ssh_key>
+```
+
+- Stops and removes the service containers for that service.
+- Service metadata and compose templates are kept; this command does not delete project files.
 
 
 Notes:

@@ -458,24 +458,6 @@ def test_image_push_help():
     assert "--registry-username" in result.output
 
 
-# ---------------------------------------------------------------------------
-# CLI: image push --dry-run
-# ---------------------------------------------------------------------------
-
-def test_image_push_dry_run(monkeypatch):
-    runner = CliRunner()
-    monkeypatch.setattr(main_module, "execute_image_push", lambda context, console, *, dry_run=False: dry_run)
-
-    result = runner.invoke(image_push, [
-        "--image", "nginx:latest",
-        "--remote", "example.com",
-        "--username", "alice",
-        "--dry-run",
-    ])
-
-    assert result.exit_code == 0
-
-
 def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
     runner = CliRunner()
     captured = {}
@@ -498,7 +480,7 @@ def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
     monkeypatch.setattr(
         main_module,
         "execute_image_push",
-        lambda context, console, *, dry_run=False: captured.update({
+        lambda context, console: captured.update({
             "host": context.profile.host,
             "port": context.profile.port,
             "username": context.profile.username,
@@ -510,7 +492,6 @@ def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
     result = runner.invoke(image_push, [
         "--image", "nginx:latest",
         "--use-config",
-        "--dry-run",
     ])
 
     assert result.exit_code == 0
@@ -537,7 +518,7 @@ def test_image_push_persists_args_only_after_success(monkeypatch):
                 used_saved_args=False,
             )
 
-    def fake_execute(context, console, *, dry_run=False):
+    def fake_execute(context, console):
         return True
 
     def fake_persist(config, context):
@@ -571,7 +552,7 @@ def test_image_push_does_not_persist_when_execution_fails(monkeypatch):
                 used_saved_args=False,
             )
 
-    def fake_execute(context, console, *, dry_run=False):
+    def fake_execute(context, console):
         return False
 
     def fake_persist(config, context):

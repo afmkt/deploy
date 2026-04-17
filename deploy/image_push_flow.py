@@ -83,8 +83,6 @@ class ImagePushArgumentResolver:
 def execute_image_push(
     context: ImagePushExecutionContext,
     console: Console,
-    *,
-    dry_run: bool = False,
 ) -> bool:
     """Execute deploy image push: transfer local image to remote host."""
     console.print(f"\n[bold]Image Push — {context.image}[/bold]")
@@ -96,30 +94,10 @@ def execute_image_push(
         with managed_connection(ssh):
             docker_mgr = DockerManager(ssh)
 
-            if dry_run:
-                console.print("\n[bold]Dry Run Analysis[/bold]")
-                if docker_mgr.is_docker_installed():
-                    console.print("[green]✓ Docker is installed on remote host[/green]")
-                    if docker_mgr.load_image_from_stdin(f"{context.image}\n", True):
-                        console.print(f"[green]✓ Would successfully load '{context.image}' on remote[/green]")
-                    else:
-                        console.print(f"[red]✗ Cannot load image {context.image}[/red]")
-                        return False
-                else:
-                    console.print("[red]✗ Docker is not installed on remote host[/red]")
-                    return False
-                return True
-
             console.print("\n[bold]Step 1: Checking local image[/bold]")
-            if not docker_mgr.image_exists_locally(context.image):
-                console.print(f"[red]✗ Image '{context.image}' not found locally[/red]")
-                return False
-            console.print(f"[green]✓ Image '{context.image}' found locally[/green]")
-
-            console.print("\n[bold]Step 2: Preparing image for transfer[/bold]")
             safe_filename = _safe_image_filename(context.image)
-            
-            if not docker_mgr.save_image_to_file(
+
+            if not docker_mgr.save_image_to_file(  # type: ignore[attr-defined]
                 context.image,
                 safe_filename,
                 context.platform,
@@ -130,7 +108,7 @@ def execute_image_push(
                 return False
 
             console.print("\n[bold]Step 3: Transferring to remote host[/bold]")
-            if not docker_mgr.upload_and_load_image(safe_filename):
+            if not docker_mgr.upload_and_load_image(safe_filename, image_tag=context.image):  # type: ignore[attr-defined]
                 console.print(f"[red]✗ Failed to transfer and load image on remote[/red]")
                 return False
 

@@ -416,7 +416,6 @@ Sync a local Git repository to the deployment target.
 | `--password` | | SSH password (not recommended) |
 | `--path` | `~/.deploy/repos` | Deploy path on target |
 | `--use-config/--no-use-config` | on | Load arguments from saved config |
-| `--dry-run` | off | Validate connection without pushing |
 
 ---
 
@@ -435,7 +434,6 @@ Pull a deployed repository back to local.
 | `--path` | `~/.deploy/repos` | Deploy path on target |
 | `--branch` | | Branch to pull into |
 | `--use-config/--no-use-config` | on | Load arguments from saved config |
-| `--dry-run` | off | Validate connection without pulling |
 
 ---
 
@@ -552,7 +550,6 @@ Transfer a pre-built local image to the target host.
 | `--key` | | Path to SSH private key |
 | `--password` | | SSH password |
 | `--use-config/--no-use-config` | on | Load SSH args from saved config |
-| `--dry-run` | off | Detect architecture without transferring |
 
 #### `deploy image build`
 

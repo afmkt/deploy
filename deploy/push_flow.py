@@ -99,7 +99,7 @@ class PushArgumentResolver:
         )
 
 
-def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bool = False) -> bool:
+def execute_push(context: PushExecutionContext, console: Console) -> bool:
     """Execute deploy push using fully resolved arguments."""
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
     repo = GitRepository(context.repo_path)
@@ -114,10 +114,6 @@ def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bo
 
     try:
         with managed_connection(ssh):
-            if dry_run:
-                console.print("\n[green]✓ Dry run completed successfully - connection and arguments are valid[/green]")
-                return True
-
             console.print("\n[bold]Step 4: Setting up remote repository[/bold]")
             remote = RemoteServer(ssh, context.deploy_path)
             current_branch = repo.get_current_branch() or "main"

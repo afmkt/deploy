@@ -101,7 +101,7 @@ class PullArgumentResolver:
         )
 
 
-def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bool = False) -> bool:
+def execute_pull(context: PullExecutionContext, console: Console) -> bool:
     """Execute deploy pull using fully resolved arguments."""
     console.print("\n[bold]Step 1: Validating local repository[/bold]")
     repo = GitRepository(context.repo_path)
@@ -116,10 +116,6 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
 
     try:
         with managed_connection(ssh):
-            if dry_run:
-                console.print("\n[green]✓ Dry run completed successfully - connection and arguments are valid[/green]")
-                return True
-
             remote = RemoteServer(ssh, context.deploy_path)
             bare_repo_path = remote.get_bare_repo_path(repo_name)
             working_dir_path = remote.get_working_dir_path(repo_name)

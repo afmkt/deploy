@@ -27,7 +27,6 @@ Useful options:
 - `--path`: Remote deploy base path. Defaults to `~/.deploy/repos`.
 - `--repo-path`: Local repository path. Defaults to `.`.
 - `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
-- `--dry-run`: Validate arguments and connectivity without performing the push.
 
 Saved config section:
 - `repo.push`
@@ -44,7 +43,6 @@ Useful options:
 - `--repo-path`: Local repository path. Defaults to `.`.
 - `--branch`: Pull into a specific local branch.
 - `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
-- `--dry-run`: Validate arguments and connectivity without performing the pull.
 
 Saved config section:
 - `repo.pull`
@@ -62,7 +60,6 @@ Useful options:
 - `--registry-username`: Registry username for private images.
 - `--registry-password`: Registry password for private images.
 - `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
-- `--dry-run`: Validate the image transfer path without sending the image.
 
 Saved config section:
 - `image.push`

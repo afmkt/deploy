@@ -17,7 +17,7 @@ def test_config_save_and_load():
             "port": 22,
             "username": "user",
             "key": "/path/to/key",
-            "deploy_path": "/var/repos",
+            "deploy_path": "~/.deploy/repos",
         }
         config.save_args(args, "push")
         

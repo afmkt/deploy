@@ -150,7 +150,7 @@ def prompt_deploy_path() -> str:
         Deployment path
     """
     console.print("\n[bold blue]Deployment Configuration[/bold blue]")
-    deploy_path = Prompt.ask("Deploy path on remote server", default="/var/repos")
+    deploy_path = Prompt.ask("Deploy path on remote server", default="~/.deploy/repos")
 
     if not validate_path(deploy_path):
         console.print("[red]✗ Invalid deploy path[/red]")

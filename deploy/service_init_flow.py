@@ -74,6 +74,9 @@ class ServiceInitArgumentResolver:
         if not domain and not internal:
             return None
 
+        if not image:
+            return None
+
         resolved_domain = domain
 
         entrypoint_file, app_str, default_port = detect_fastapi_entrypoint(project_dir)
@@ -98,18 +101,18 @@ class ServiceInitArgumentResolver:
             ),
             ResolvedArgument(
                 name="image",
-                value=image or "<build from Dockerfile>",
-                origin="cli (--image)" if image else "default (compose build directive)",
+                value=image,
+                origin="cli/config/prompt (--image)",
             ),
             ResolvedArgument(
                 name="ingress_networks",
                 value=", ".join(resolved_ingress_networks),
-                origin="cli (--ingress-network)" if ingress_networks else "default (ingress)",
+                origin="cli (--network)" if ingress_networks else "default (ingress)",
             ),
             ResolvedArgument(
                 name="global_ingress",
                 value=str(global_ingress).lower(),
-                origin="cli (--global-ingress)" if global_ingress else "default (--no-global-ingress)",
+                origin="cli (--global)" if global_ingress else "default (--no-global)",
             ),
             ResolvedArgument(
                 name="path_prefix",
@@ -230,12 +233,12 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
     console.print("\n[bold]3. Most likely customization points[/bold]")
     console.print("  - Dockerfile: runtime base image, dependency install strategy, startup command")
     console.print("  - docker-compose.yml: image/build mode, labels/routing, env vars, mounts, restart policy")
-    console.print("  - Flags to rerun with: --path-prefix, --ingress-network, --global-ingress, --internal, --force")
+    console.print("  - Flags to rerun with: --path-prefix, --network, --global, --internal, --force")
 
     suggested_image = context.image or f"{context.service_name}:latest"
     next_command = (
-        f"deploy image build-remote -i {suggested_image} --host <host> --username <username>\n"
-        f"  deploy svc up -n {context.service_name} --host <host> --username <username>"
+        f"deploy image build --tag {suggested_image} --remote <host> --username <username>\n"
+        f"  deploy svc up -n {context.service_name} --remote <host> --username <username>"
     )
     console.print("\n[bold]4. Most likely next command[/bold]")
     console.print(f"  [dim]{next_command}[/dim]")

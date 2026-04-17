@@ -55,7 +55,7 @@ class ProxyUpArgumentResolver:
         interactive: bool,
     ) -> ProxyUpResolutionResult | None:
         completed_profile = resolve_connection_profile(
-            config, "proxy", profile, use_config=self.use_config
+            config, "proxy.up", profile, use_config=self.use_config
         )
         if completed_profile is None:
             return None
@@ -209,5 +209,5 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
 def persist_proxy_up_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
     """Save resolved proxy-up connection args for later runs."""
     args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "proxy")
+    config.save_args(args_to_save, "proxy.up")
     return args_to_save

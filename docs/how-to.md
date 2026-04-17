@@ -38,12 +38,12 @@ can receive routed traffic. This is a one-time setup per host.
 
 ```sh
 deploy proxy up \
-  --host <host> \
+  --remote <host> \
   --username <user> \
   --key ~/.ssh/id_ed25519
 ```
 
-On the first run this saves the connection to `~/.deploy/config.json`. All
+On the first run this saves the connection to `~/.deploy/config.yaml`. All
 subsequent commands can use `--use-config` (which is the default for `proxy`
 subcommands) to skip repeating the flags.
 
@@ -82,7 +82,7 @@ to proceed; the tool:
 4. Stops native Caddy.
 5. Starts docker-caddy-proxy.
 
-If the migration is not wanted, pass `--no-migrate-native-caddy`.
+If the migration is not wanted, pass `--no-bootstrap`.
 
 **Important:** services that native Caddy was proxying via loopback must listen
 on `0.0.0.0:<port>` (not `127.0.0.1:<port>`) to be reachable from inside a
@@ -119,9 +119,9 @@ commands if needed.
 ### Step 2 — Push the source to the target
 
 ```sh
-deploy push \
-  --host <host> --username <user> --key ~/.ssh/id_ed25519 \
-  --deploy-path /srv/deploy/repos
+deploy repo push \
+  --remote <host> --username <user> --key ~/.ssh/id_ed25519 \
+  --path /srv/deploy/repos
 ```
 
 ### Step 3 — Ensure the proxy is running
@@ -137,19 +137,19 @@ Choose one mode:
 - Build on target from synced source:
 
 ```sh
-deploy image build-remote -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy image build --tag myapp:latest --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 - Push a pre-built local image:
 
 ```sh
-deploy image push -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy image push --image myapp:latest --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 ### Step 5 — Start the service
 
 ```sh
-deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy svc up --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 `svc up` checks that the proxy is running, verifies the image exists on target,
@@ -171,14 +171,14 @@ After editing source code or dependencies:
 **Push updated source to target:**
 
 ```sh
-deploy push
+deploy repo push
 ```
 
 **Build a new image on target and restart:**
 
 ```sh
-deploy image build-remote -i myapp:latest --host <host> --username <user> --key ~/.ssh/id_ed25519
-deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy image build --tag myapp:latest --remote <host> --username <user> --key ~/.ssh/id_ed25519
+deploy svc up --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 **Verify the service came back healthy:**
@@ -197,8 +197,8 @@ to be rebuilt on the target.
 **Transfer the image:**
 
 ```sh
-deploy image push -i myapp:1.2.3 \
-  --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy image push --image myapp:1.2.3 \
+  --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 The tool detects the target architecture and transfers the correct image variant
@@ -208,7 +208,7 @@ via SFTP.
 
 ```sh
 deploy svc init -d api.example.com -i myapp:1.2.3
-deploy svc up --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy svc up --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 Because the image is already present on target, `svc up` proceeds directly to
@@ -224,25 +224,25 @@ Each application gets its own Docker network. The proxy attaches to all of them.
 
 ```sh
 deploy proxy up \
-  --ingress-network app-a \
-  --ingress-network app-b
+  --network app-a \
+  --network app-b
 ```
 
 Or equivalently with comma-separated values:
 
 ```sh
-deploy proxy up --ingress-network app-a,app-b
+deploy proxy up --network app-a,app-b
 ```
 
 **Deploy each service on its own network:**
 
 ```sh
-# From the app-a repository (scaffolded with --ingress-network app-a -i app-a:latest)
-deploy image push -i app-a:latest
+# From the app-a repository (scaffolded with --network app-a -i app-a:latest)
+deploy image push --image app-a:latest
 deploy svc up
 
-# From the app-b repository (scaffolded with --ingress-network app-b -i app-b:latest)
-deploy image push -i app-b:latest
+# From the app-b repository (scaffolded with --network app-b -i app-b:latest)
+deploy image push --image app-b:latest
 deploy svc up
 ```
 
@@ -256,7 +256,7 @@ changes can be marked global during `svc init`:
 
 ```sh
 deploy svc init -i shared:latest -d shared.example.com --global-ingress
-deploy image push -i shared:latest
+deploy image push --image shared:latest
 deploy svc up
 ```
 
@@ -281,7 +281,7 @@ the prefix before forwarding, so the upstream service sees a clean path.
 ```sh
 # Inside the auth-ui repository
 deploy svc init -d auth.example.com --name auth-ui
-deploy image build-remote -i auth-ui:latest
+deploy image build --tag auth-ui:latest
 deploy svc up --name auth-ui
 ```
 
@@ -290,7 +290,7 @@ deploy svc up --name auth-ui
 ```sh
 # Inside the auth-api repository
 deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
-deploy image build-remote -i auth-api:latest
+deploy image build --tag auth-api:latest
 deploy svc up --name auth-api
 ```
 
@@ -368,27 +368,27 @@ services:
 
 ## 8. Local machine target (dev / testing)
 
-Set `--host localhost` to run the same workflow on the current machine without
+Set `--remote localhost` to run the same workflow on the current machine without
 SSH.
 
 **Push source locally:**
 
 ```sh
-deploy push --host localhost --deploy-path /tmp/deploy/repos
+deploy repo push --remote localhost --path /tmp/deploy/repos
 ```
 
 **Start the proxy locally:**
 
 ```sh
-deploy proxy up --host localhost
+deploy proxy up --remote localhost
 ```
 
 **Deploy a service locally:**
 
 ```sh
 deploy svc init -d localhost -n myapp
-deploy image build-remote -i myapp:latest --host localhost
-deploy svc up --host localhost
+deploy image build --tag myapp:latest --remote localhost
+deploy svc up --remote localhost
 ```
 
 The `localhost` domain tells Caddy to use plain HTTP (no TLS certificate
@@ -397,7 +397,7 @@ required), so you can reach the service at `http://localhost/<path>`.
 **Transfer a Docker image to local:**
 
 ```sh
-deploy image push -i myapp:dev --host localhost
+deploy image push --image myapp:dev --remote localhost
 ```
 
 ---
@@ -434,7 +434,7 @@ server), pull those changes back.
 **Simple pull (clean remote working tree):**
 
 ```sh
-deploy pull --host <host> --username <user> --key ~/.ssh/id_ed25519
+deploy repo pull --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
 **Commit remote changes, then pull:**
@@ -443,7 +443,7 @@ Use `--commit` when the remote working tree has uncommitted edits that should be
 preserved:
 
 ```sh
-deploy pull --commit
+deploy repo pull --commit
 ```
 
 This commits the remote edits in place before pulling so nothing is lost.
@@ -454,7 +454,7 @@ Use `--sync-remote` when the remote working directory contains changes that have
 not been pushed to the on-host bare repository yet:
 
 ```sh
-deploy pull --sync-remote
+deploy repo pull --sync-remote
 ```
 
 This chains the steps automatically:
@@ -465,7 +465,7 @@ This chains the steps automatically:
 Pull into a specific local branch:
 
 ```sh
-deploy pull --sync-remote --branch hotfix/fix-upstream
+deploy repo pull --sync-remote --branch hotfix/fix-upstream
 ```
 
 ---

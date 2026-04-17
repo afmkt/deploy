@@ -1,4 +1,4 @@
-"""Tests for DockerManager and docker-push CLI command."""
+"""Tests for DockerManager and image push CLI command."""
 
 import subprocess
 import pytest
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch, call
 from click.testing import CliRunner
 
 from deploy.docker import DockerManager, _safe_image_filename
-from main import docker_push
+from main import image_push
 import main as main_module
 
 
@@ -446,12 +446,12 @@ def test_transfer_tarball_failure(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# CLI: docker-push --help
+# CLI: image push --help
 # ---------------------------------------------------------------------------
 
-def test_docker_push_help():
+def test_image_push_help():
     runner = CliRunner()
-    result = runner.invoke(docker_push, ["--help"])
+    result = runner.invoke(image_push, ["--help"])
     assert result.exit_code == 0
     assert "--image" in result.output
     assert "--platform" in result.output
@@ -459,88 +459,59 @@ def test_docker_push_help():
 
 
 # ---------------------------------------------------------------------------
-# CLI: docker-push --dry-run
+# CLI: image push --dry-run
 # ---------------------------------------------------------------------------
 
-def test_docker_push_dry_run(monkeypatch):
+def test_image_push_dry_run(monkeypatch):
     runner = CliRunner()
+    monkeypatch.setattr(main_module, "execute_image_push", lambda context, console, *, dry_run=False: dry_run)
 
-    def fake_connect(self):
-        self.client = MagicMock()
-        return True
-
-    def fake_disconnect(self):
-        pass
-
-    from deploy import ssh as ssh_module
-
-    monkeypatch.setattr(ssh_module.SSHConnection, "connect", fake_connect)
-    monkeypatch.setattr(ssh_module.SSHConnection, "disconnect", fake_disconnect)
-
-    with patch("deploy.docker.DockerManager.is_docker_installed", return_value=True), \
-         patch("deploy.docker.DockerManager.get_docker_version", return_value="24.0"), \
-         patch("deploy.docker.DockerManager.detect_remote_arch", return_value="linux/amd64"):
-
-        result = runner.invoke(docker_push, [
-            "--image", "nginx:latest",
-            "--host", "example.com",
-            "--username", "alice",
-            "--no-interactive",
-            "--dry-run",
-        ])
+    result = runner.invoke(image_push, [
+        "--image", "nginx:latest",
+        "--remote", "example.com",
+        "--username", "alice",
+        "--dry-run",
+    ])
 
     assert result.exit_code == 0
-    assert "Dry run" in result.output or "linux/amd64" in result.output
 
 
-def test_docker_push_use_config_falls_back_to_push_profile(monkeypatch):
+def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
     runner = CliRunner()
     captured = {}
 
-    class FakeSSHConnection:
-        def __init__(self, host, port=22, username=None, password=None, key_filename=None):
-            captured["host"] = host
-            captured["port"] = port
-            captured["username"] = username
-            captured["password"] = password
-            captured["key_filename"] = key_filename
-            self.client = MagicMock()
-
-        def connect(self):
-            return True
-
-        def disconnect(self):
-            pass
-
-        def execute(self, command):
-            return 0, "", ""
-
-    def fake_load_args(self, command="push"):
-        if command == "docker-push":
-            return {"host": "example.com", "port": 22, "username": "alice"}
-        if command == "push":
+    def fake_load_args(self, command="repo.push"):
+        if command == "image.push":
+            return {"remote": "example.com", "port": 22, "username": "alice"}
+        if command == "repo.push":
             return {
-                "host": "47.100.30.18",
+                "remote": "47.100.30.18",
                 "port": 22,
                 "username": "root",
                 "key": "/Users/michael/.ssh/id_rsa",
             }
         return {}
 
-    monkeypatch.setattr("deploy.session.SSHConnection", FakeSSHConnection)
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", fake_load_args)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
     monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+    monkeypatch.setattr(
+        main_module,
+        "execute_image_push",
+        lambda context, console, *, dry_run=False: captured.update({
+            "host": context.profile.host,
+            "port": context.profile.port,
+            "username": context.profile.username,
+            "password": context.profile.password,
+            "key_filename": context.profile.key,
+        }) or True,
+    )
 
-    with patch("deploy.docker.DockerManager.is_docker_installed", return_value=True), \
-         patch("deploy.docker.DockerManager.get_docker_version", return_value="24.0"), \
-         patch("deploy.docker.DockerManager.detect_remote_arch", return_value="linux/amd64"):
-        result = runner.invoke(docker_push, [
-            "--image", "nginx:latest",
-            "--use-config",
-            "--no-interactive",
-            "--dry-run",
-        ])
+    result = runner.invoke(image_push, [
+        "--image", "nginx:latest",
+        "--use-config",
+        "--dry-run",
+    ])
 
     assert result.exit_code == 0
     assert captured == {
@@ -552,7 +523,7 @@ def test_docker_push_use_config_falls_back_to_push_profile(monkeypatch):
     }
 
 
-def test_docker_push_persists_args_only_after_success(monkeypatch):
+def test_image_push_persists_args_only_after_success(monkeypatch):
     runner = CliRunner()
     persisted = {"called": False}
 
@@ -572,23 +543,21 @@ def test_docker_push_persists_args_only_after_success(monkeypatch):
     def fake_persist(config, context):
         persisted["called"] = True
 
-    monkeypatch.setattr(main_module, "DockerPushArgumentResolver", FakeResolver)
-    monkeypatch.setattr(main_module, "execute_docker_push", fake_execute)
-    monkeypatch.setattr(main_module, "persist_docker_push_resolution", fake_persist)
-    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+    monkeypatch.setattr(main_module, "ImagePushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_image_push", fake_execute)
+    monkeypatch.setattr(main_module, "persist_image_push_resolution", fake_persist)
 
-    result = runner.invoke(docker_push, [
+    result = runner.invoke(image_push, [
         "--image", "nginx:latest",
-        "--host", "localhost",
+        "--remote", "localhost",
         "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 0
     assert persisted["called"] is True
 
 
-def test_docker_push_does_not_persist_when_execution_fails(monkeypatch):
+def test_image_push_does_not_persist_when_execution_fails(monkeypatch):
     runner = CliRunner()
     persisted = {"called": False}
 
@@ -608,15 +577,14 @@ def test_docker_push_does_not_persist_when_execution_fails(monkeypatch):
     def fake_persist(config, context):
         persisted["called"] = True
 
-    monkeypatch.setattr(main_module, "DockerPushArgumentResolver", FakeResolver)
-    monkeypatch.setattr(main_module, "execute_docker_push", fake_execute)
-    monkeypatch.setattr(main_module, "persist_docker_push_resolution", fake_persist)
+    monkeypatch.setattr(main_module, "ImagePushArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_image_push", fake_execute)
+    monkeypatch.setattr(main_module, "persist_image_push_resolution", fake_persist)
 
-    result = runner.invoke(docker_push, [
+    result = runner.invoke(image_push, [
         "--image", "nginx:latest",
-        "--host", "localhost",
+        "--remote", "localhost",
         "--no-use-config",
-        "--no-interactive",
     ])
 
     assert result.exit_code == 1

@@ -14,8 +14,8 @@ This repository is prepared for open-source use as a binary CLI tool.
 ## Current Status
 
 - Git push/pull workflows are stable.
-- Core operational commands derive local vs remote behavior from connection profile (`--host localhost` for local runs).
-- Docker image transfer (`docker-push`) supports remote architecture targeting.
+- Core operational commands derive local vs remote behavior from connection profile (`--remote localhost` for local runs).
+- Docker image transfer (`image push`) supports remote architecture targeting.
 - `proxy` command group manages `lucaslorentz/caddy-docker-proxy`.
 - Native Caddy bootstrap and port handoff is supported.
 - Proxy operation is bridge-mode only.
@@ -27,7 +27,7 @@ This repository is prepared for open-source use as a binary CLI tool.
 
 - Python 3.12+
 - `uv` for local development/build workflows
-- Docker available locally (for `docker-push`)
+- Docker available locally (for `image push`)
 - Docker available on the target machine
 - SSH access to remote host when targeting a remote machine
 
@@ -60,55 +60,51 @@ uv run python main.py --help
 - CLI argument and command reference (resolution-first): `docs/cli-reference.md`
 - Workflow playbooks and end-to-end scenarios: `docs/how-to.md`
 
-## Top-Level Commands
+## Command Groups
 
 ```text
-push
-pull
-docker-push
+repo
 image
 proxy
 svc
-monitor
-show-config
-clear-config
 ```
 
 Global options:
 
 - `--help`
 - `--version`
+- `--non-interactive`: Disable all interactive prompts (required for scripted/CI use).
 
 ## Core Workflows
 
 ### 1) Git Push to Remote
 
 ```sh
-deploy push --host <host> --username <user> --key <ssh_key> --deploy-path /tmp/deploy/repos
+deploy repo push --remote <host> --username <user> --key <ssh_key> --path /tmp/deploy/repos
 ```
 
 Use saved config on later runs:
 
 ```sh
-deploy push --use-config
+deploy repo push --use-config
 ```
 
 Run the same workflow on the local machine:
 
 ```sh
-deploy push --host localhost --deploy-path /tmp/deploy/repos
+deploy repo push --remote localhost --path /tmp/deploy/repos
 ```
 
 ### 2) Git Pull from Remote
 
 ```sh
-deploy pull --host <host> --username <user> --key <ssh_key> --deploy-path /tmp/deploy/repos
+deploy repo pull --remote <host> --username <user> --key <ssh_key> --path /tmp/deploy/repos
 ```
 
 Local target example:
 
 ```sh
-deploy pull --host localhost --deploy-path /tmp/deploy/repos
+deploy repo pull --remote localhost --path /tmp/deploy/repos
 ```
 
 Useful options:
@@ -121,25 +117,25 @@ Examples:
 
 ```sh
 # Pull into a specific branch
-deploy pull --branch feature-x
+deploy repo pull --branch feature-x
 
 # Commit remote working tree changes before pulling
-deploy pull --commit
+deploy repo pull --commit
 
 # Fully sync remote working tree -> bare repo -> local repo
-deploy pull --sync-remote
+deploy repo pull --sync-remote
 ```
 
 ### 3) Push Docker Image to Target
 
 ```sh
-deploy docker-push -i <image:tag> --host <host> --username <user> --key <ssh_key>
+deploy image push --image <image:tag> --remote <host> --username <user> --key <ssh_key>
 ```
 
 Local target example:
 
 ```sh
-deploy docker-push -i <image:tag> --host localhost
+deploy image push --image <image:tag> --remote localhost
 ```
 
 Notes:
@@ -167,8 +163,8 @@ deploy proxy down --use-config
 
 Useful options:
 
-- `--ingress-network <name>`: Attach proxy to one or more external networks. Repeat the option or use comma-separated values.
-- `--host localhost`: Run the same proxy workflow on the current machine instead of over SSH.
+- `--network <name>`: Attach proxy to one or more external networks. Repeat the option to add multiple networks.
+- `--remote localhost`: Run the same proxy workflow on the current machine instead of over SSH.
 
 Examples:
 
@@ -178,11 +174,8 @@ deploy proxy up --use-config
 
 # Attach proxy to multiple app networks
 deploy proxy up --use-config \
-    --ingress-network app-a \
-    --ingress-network app-b
-
-# Equivalent comma-separated form
-deploy proxy up --use-config --ingress-network app-a,app-b
+    --network app-a \
+    --network app-b
 ```
 
 ### Native Caddy Bootstrap Behavior
@@ -212,7 +205,7 @@ deploy svc init -d api.example.com
 
 Useful options:
 
-- `--ingress-network <name>`: External network that this service joins for caddy routing (default: `ingress`).
+- `--network <name>`: External network that this service joins for caddy routing (default: `ingress`).
 - `--global-ingress`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
 - `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain (e.g. `/api/auth`). Allows multiple services to share one domain via path-based routing.
 - `--internal`: Mark the service as internal-only — no Caddy labels, no ingress network. The container is reachable only by other containers on the same Docker network. `--domain` is optional when `--internal` is set.
@@ -220,7 +213,7 @@ Useful options:
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --ingress-network app-a
+deploy svc init -d api.example.com --network app-a
 ```
 
 Example with a path prefix (API lives at `/api/auth` on a shared domain):
@@ -249,30 +242,30 @@ This generates:
 Build image on target from synced source:
 
 ```sh
-deploy image build-remote -i <image:tag> --host <host> --username <user> --key <ssh_key>
+deploy image build --tag <image:tag> --remote <host> --username <user> --key <ssh_key>
 ```
 
 Or push a pre-built local image:
 
 ```sh
-deploy image push -i <image:tag> --host <host> --username <user> --key <ssh_key>
+deploy image push --image <image:tag> --remote <host> --username <user> --key <ssh_key>
 ```
 
 Then start service:
 
 ```sh
-deploy svc up --host <host> --username <user> --key <ssh_key>
+deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
 
 Local target:
 
 ```sh
-deploy svc up --host localhost
+deploy svc up --remote localhost
 ```
 
 Useful options:
 
-- `--host localhost`: Deploy to the current machine instead of a remote host.
+- `--remote localhost`: Deploy to the current machine instead of a remote host.
 
 Notes:
 
@@ -286,7 +279,7 @@ Notes:
 After changing source code or dependencies, build and redeploy:
 
 ```sh
-deploy image build-remote -i <image:tag>
+deploy image build --tag <image:tag>
 deploy svc up
 ```
 
@@ -309,17 +302,17 @@ In-network access: http://<service-name>:8000/<path>
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --ingress-network app-a
-deploy image build-remote -i api:latest --host <host> --username <user> --key <ssh_key>
-deploy svc up --host <host> --username <user> --key <ssh_key>
+deploy svc init -d api.example.com --network app-a
+deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
+deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
 
 Example with a globally exposed service:
 
 ```sh
 deploy svc init -d api.example.com --global-ingress
-deploy image build-remote -i api:latest --host <host> --username <user> --key <ssh_key>
-deploy svc up --host <host> --username <user> --key <ssh_key>
+deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
+deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
 
 ### Path-Based Routing — Multiple Services on One Domain
@@ -331,11 +324,11 @@ prefixed services only handle requests under their path.
 ```sh
 # Auth UI — owns the domain root
 deploy svc init -d auth.example.com --name auth-ui
-deploy svc up --name auth-ui --host <host> --username <user> --key <ssh_key>
+deploy svc up --name auth-ui --remote <host> --username <user> --key <ssh_key>
 
 # Auth API — owns /api/auth/* only; prefix is stripped before forwarding
 deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
-deploy svc up --name auth-api --host <host> --username <user> --key <ssh_key>
+deploy svc up --name auth-api --remote <host> --username <user> --key <ssh_key>
 ```
 
 Both containers must join the same ingress network. Caddy merges them into one
@@ -350,7 +343,7 @@ membership are added.
 
 ```sh
 deploy svc init --name session-store --internal
-deploy svc up --name session-store --host <host> --username <user> --key <ssh_key>
+deploy svc up --name session-store --remote <host> --username <user> --key <ssh_key>
 ```
 
 `--domain` is optional for internal services. The container is reachable by name
@@ -358,21 +351,21 @@ from other containers on the same Docker Compose project network.
 
 Recommended shared-host pattern:
 
-1. Scaffold each service with its own `--ingress-network` and explicit `--domain`.
+1. Scaffold each service with its own `--network` and explicit `--domain`.
 2. Start proxy once with all application networks.
 3. Deploy each service.
 
 ```sh
 # Set up services with their network and domain
-deploy svc init -n app-a -d a.example.com --ingress-network app-a -i <image:a>
-deploy svc init -n app-b -d b.example.com --ingress-network app-b -i <image:b>
+deploy svc init -n app-a -d a.example.com --network app-a -i <image:a>
+deploy svc init -n app-b -d b.example.com --network app-b -i <image:b>
 
 # Start shared proxy
-deploy proxy up --use-config --ingress-network app-a --ingress-network app-b
+deploy proxy up --use-config --network app-a --network app-b
 
 # Deploy services (configuration comes from docker-compose.yml)
-deploy svc up -n app-a --host <host> --username <user> --key <ssh_key>
-deploy svc up -n app-b --host <host> --username <user> --key <ssh_key>
+deploy svc up -n app-a --remote <host> --username <user> --key <ssh_key>
+deploy svc up -n app-b --remote <host> --username <user> --key <ssh_key>
 ```
 
 ### Check Service Status
@@ -397,7 +390,7 @@ re-running `svc init` with the correct domain and then deploying:
 
 ```sh
 deploy svc init --name <service> -d <correct-host>
-deploy svc up --name <service> --host <host> --username <user> --key <ssh_key>
+deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
 
 ## Monitor TUI
@@ -415,50 +408,14 @@ Useful options:
 - `--command-timeout <seconds>`: SSH timeout per remote command (default `10`)
 - `--action-timeout <seconds>`: overall timeout per monitor action (default `15`)
 
-Keybindings:
-
-- `r`: refresh now
-- `u`: proxy up
-- `d`: proxy down
-- `s`: start selected service
-- `x`: stop selected service
-- `z`: stop and remove selected service deployment
-- `t`: restart selected service
-- `n`: create Docker network
-- `l`: fetch logs for selected service (or proxy if no service is selected)
-- `c`: request cancellation of in-progress action
-- `q`: quit
-
-The monitor is intentionally lightweight: it is not an orchestrator and does not
-attempt Kubernetes-style reconciliation.
+The monitor accepts the same `--remote`, `--port`, `--username`, `--key`, `--password`, `--use-config` options as other commands.
 
 ## Configuration
 
 Saved config file:
 
 ```text
-~/.deploy/config.json
-```
-
-Show saved config:
-
-```sh
-deploy show-config
-```
-
-Clear all config:
-
-```sh
-deploy clear-config
-```
-
-Clear one section:
-
-```sh
-deploy clear-config --command push
-deploy clear-config --command pull
-deploy clear-config --command proxy
-deploy clear-config --command service
+~/.deploy/config.yaml
 ```
 
 Notes:
@@ -468,63 +425,44 @@ Notes:
 
 ## Command Reference
 
-### `deploy push`
+Global option: `--non-interactive` disables all interactive prompts (required for CI/scripted use).
+
+### `deploy repo push`
 
 Sync a local Git repository to the deployment target.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--repo-path` | `-r` | `.` | Path to local Git repository |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--port` | `-p` | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password (not recommended) |
-| `--deploy-path` | `-d` | `/tmp/deploy/repos` | Deploy path on target |
-| `--use-config` | | off | Load arguments from saved config |
-| `--dry-run` | | off | Validate connection without pushing |
-| `--interactive/--no-interactive` | | on | Interactive mode |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--repo-path` | `.` | Path to local Git repository |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password (not recommended) |
+| `--path` | `/tmp/deploy/repos` | Deploy path on target |
+| `--use-config/--no-use-config` | on | Load arguments from saved config |
+| `--dry-run` | off | Validate connection without pushing |
 
 ---
 
-### `deploy pull`
+### `deploy repo pull`
 
 Pull a deployed repository back to local.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--repo-path` | `-r` | `.` | Path to local Git repository |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--port` | `-p` | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--deploy-path` | `-d` | `/tmp/deploy/repos` | Deploy path on target |
-| `--branch` | `-b` | | Branch to pull into |
-| `--commit` | | off | Commit remote working tree changes before pulling |
-| `--sync-remote` | | off | Full sync: commit remote → push to bare → pull locally |
-| `--use-config` | | off | Load arguments from saved config |
-| `--dry-run` | | off | Validate connection without pulling |
-
----
-
-### `deploy docker-push`
-
-Transfer a Docker image to the deployment target.
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--image` | `-i` | *(required)* | Docker image to transfer (`name:tag`) |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--port` | `-p` | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--platform` | | *(auto-detect)* | Override target platform (e.g. `linux/amd64`) |
-| `--registry-username` | | | Docker registry username for private images |
-| `--registry-password` | | | Docker registry password for private images |
-| `--use-config` | | off | Load arguments from saved config |
-| `--dry-run` | | off | Detect architecture without transferring |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--repo-path` | `.` | Path to local Git repository |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--path` | `/tmp/deploy/repos` | Deploy path on target |
+| `--branch` | | Branch to pull into |
+| `--commit` | off | Commit remote working tree changes before pulling |
+| `--sync-remote` | off | Full sync: commit remote → push to bare → pull locally |
+| `--use-config/--no-use-config` | on | Load arguments from saved config |
+| `--dry-run` | off | Validate connection without pulling |
 
 ---
 
@@ -532,7 +470,7 @@ Transfer a Docker image to the deployment target.
 
 Manage the `caddy-docker-proxy` ingress container.
 
-All subcommands accept the shared connection options: `--host`, `--port`, `--username`, `--key`, `--password`, `--use-config`.
+All subcommands accept the shared connection options: `--remote`, `--port`, `--username`, `--key`, `--password`, `--use-config`.
 
 #### Subcommands
 
@@ -542,21 +480,19 @@ All subcommands accept the shared connection options: `--host`, `--port`, `--use
 | `down` | Stop the proxy stack |
 | `status` | Show container status |
 | `logs` | Show recent proxy container logs |
-| `diagnose` | Collect proxy and native Caddy diagnostics |
 
 #### `proxy up` additional options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--ingress-network` | `ingress` | External network to attach proxy to (repeatable or comma-separated) |
-| `--migrate-native-caddy/--no-migrate-native-caddy` | on | Migrate native Caddy config and hand over ports 80/443 |
-| `--interactive/--no-interactive` | on | Interactive mode |
+| `--network` | | External network to attach proxy to (repeatable) |
+| `--bootstrap/--no-bootstrap` | off | Migrate native Caddy config and hand over ports 80/443 |
 
-#### `proxy logs` / `proxy diagnose` additional options
+#### `proxy logs` additional options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--lines` | `80` | Number of log/journal lines to fetch |
+| `--lines` | `80` | Number of log lines to fetch |
 
 ---
 
@@ -574,8 +510,10 @@ Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the cur
 | `--name` | `-n` | *(current dir)* | Service name |
 | `--port` | | *(auto-detect)* | App port inside container |
 | `--image` | `-i` | | Use a pre-built image instead of a build directive |
-| `--ingress-network` | | `ingress` | External network for routing (repeatable or comma-separated) |
+| `--network` | | `ingress` | External network for routing (repeatable) |
 | `--global-ingress` | | off | Join every configured ingress network |
+| `--path-prefix` | | | Route only traffic under this path prefix |
+| `--internal` | | off | Internal-only service; no public routing |
 | `--force` | | off | Overwrite existing `Dockerfile` / `docker-compose.yml` |
 
 #### `deploy svc up`
@@ -585,12 +523,12 @@ Start a service on the target using an existing image.
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--name` | `-n` | *(current dir)* | Service name |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--ssh-port` | | `22` | SSH port |
+| `--remote` | | | Remote server hostname or IP |
+| `--port` | | `22` | SSH port |
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
-| `--use-config` | | on | Load SSH args from saved config |
+| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
 
 #### `deploy svc status`
 
@@ -599,12 +537,12 @@ Show routing, access URLs, and recent container logs.
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--name` | `-n` | *(current dir)* | Service name |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--port` | `-p` | `22` | SSH port |
+| `--remote` | | | Remote server hostname or IP |
+| `--port` | | `22` | SSH port |
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
-| `--use-config` | | on | Load SSH args from saved config |
+| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
 
 #### `deploy svc down`
 
@@ -613,82 +551,51 @@ Stop and remove service containers for one service.
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--name` | `-n` | *(current dir)* | Service name |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--port` | `-p` | `22` | SSH port |
+| `--remote` | | | Remote server hostname or IP |
+| `--port` | | `22` | SSH port |
 | `--username` | `-u` | | SSH username |
 | `--key` | `-k` | | Path to SSH private key |
 | `--password` | | | SSH password |
-| `--use-config` | | on | Load SSH args from saved config |
+| `--use-config/--no-use-config` | | on | Load SSH args from saved config |
 
 ---
 
 ### `deploy image`
 
-Deliver service images to the target host.
+Deliver Docker images to a target host.
 
 #### `deploy image push`
 
 Transfer a pre-built local image to the target host.
 
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--image` | `-i` | *(required)* | Docker image to transfer (`name:tag`) |
-| `--platform` | | | Target platform override |
-| `--registry-username` | | | Docker registry username |
-| `--registry-password` | | | Docker registry password |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--ssh-port` | | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--use-config` | | on | Load SSH args from saved config |
-| `--interactive/--no-interactive` | | on | Interactive mode |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--image` | *(required)* | Docker image to transfer (`name:tag`) |
+| `--platform` | | Target platform override |
+| `--registry-username` | | Docker registry username for private images |
+| `--registry-password` | | Docker registry password for private images |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--use-config/--no-use-config` | on | Load SSH args from saved config |
+| `--dry-run` | off | Detect architecture without transferring |
 
-#### `deploy image build-remote`
+#### `deploy image build`
 
-Build an image on target from the current repository.
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--image` | `-i` | *(required)* | Docker image tag to build |
-| `--deploy-path` | | *(from saved push config)* | Remote base path used for synced repository |
-| `--host` | `-h` | | Remote server hostname or IP |
-| `--ssh-port` | | `22` | SSH port |
-| `--username` | `-u` | | SSH username |
-| `--key` | `-k` | | Path to SSH private key |
-| `--password` | | | SSH password |
-| `--use-config` | | on | Load SSH args from saved config |
-| `--interactive/--no-interactive` | | on | Interactive mode |
-
----
-
-### `deploy monitor`
-
-Run the TUI monitor for proxy, services, networks, and resources.
+Build an image on the target from the synced repository.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--host`, `--port`, `--username`, `--key`, `--password`, `--use-config` | | Connection options (see above) |
-| `--refresh-interval` | `5` | Polling interval in seconds |
-| `--log-lines` | `120` | Lines to fetch per logs action |
-| `--command-timeout` | `10` | Per-command SSH timeout in seconds |
-| `--action-timeout` | `15` | Overall action timeout in seconds |
-
----
-
-### `deploy show-config`
-
-Print all saved configuration to stdout.
-
----
-
-### `deploy clear-config`
-
-Remove saved configuration.
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--command` | `-c` | Clear config for one section only (`push` \| `pull`) |
+| `--tag` | *(required)* | Docker image tag to build |
+| `--path` | *(from saved repo push config)* | Remote base path used for synced repository |
+| `--remote` | | Remote server hostname or IP |
+| `--port` | `22` | SSH port |
+| `--username` | | SSH username |
+| `--key` | | Path to SSH private key |
+| `--password` | | SSH password |
+| `--use-config/--no-use-config` | on | Load SSH args from saved config |
 
 ---
 

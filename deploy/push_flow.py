@@ -67,7 +67,7 @@ class PushArgumentResolver:
     ) -> PushResolutionResult | None:
         profile_result = load_connection_profile(
             config,
-            "push",
+            "repo.push",
             profile,
             use_config=self.use_config,
             fallback_sources=ALL_FALLBACK_SOURCES,
@@ -79,7 +79,7 @@ class PushArgumentResolver:
             deploy_path,
             self.default_deploy_path,
             saved_args,
-            "deploy_path",
+            "path",
         )
 
         completed_profile = complete_connection_profile(profile_result.profile, self.interactive)
@@ -164,9 +164,8 @@ def execute_push(context: PushExecutionContext, console: Console, *, dry_run: bo
 def persist_push_resolution(config: DeployConfig, context: PushExecutionContext) -> dict[str, Any]:
     """Save resolved push arguments for later runs."""
     args_to_save: dict[str, Any] = {
-        "repo_path": context.repo_path,
-        "deploy_path": context.deploy_path,
+        "path": context.deploy_path,
     }
     args_to_save.update(connection_args(context.profile))
-    config.save_args(args_to_save, "push")
+    config.save_args(args_to_save, "repo.push")
     return args_to_save

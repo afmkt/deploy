@@ -60,7 +60,7 @@ class ImageBuildRemoteArgumentResolver:
         interactive: bool,
     ) -> ImageBuildRemoteResolutionResult | None:
         completed_profile = resolve_connection_profile(
-            config, "image-build-remote", profile, use_config=self.use_config
+            config, "image.build", profile, use_config=self.use_config
         )
         if completed_profile is None:
             return None
@@ -71,7 +71,7 @@ class ImageBuildRemoteArgumentResolver:
                 deploy_path=deploy_path,
                 profile=completed_profile,
                 interactive=interactive,
-                use_config=use_config,
+                use_config=self.use_config,
             )
         )
 
@@ -99,8 +99,8 @@ def execute_image_build_remote(
             deploy_path = context.deploy_path
             if not deploy_path:
                 if context.use_config:
-                    saved_args = config.load_args("push")
-                    deploy_path = saved_args.get("deploy_path") if saved_args else None
+                    saved_args = config.load_args("repo.push")
+                    deploy_path = saved_args.get("path") if saved_args else None
                 if not deploy_path:
                     if context.interactive:
                         from .utils import prompt_deploy_path
@@ -125,7 +125,7 @@ def execute_image_build_remote(
                 return False, None
 
             remote = RemoteServer(ssh, deploy_path)
-            work_dir_path = remote.get_work_dir_path(repo_name)
+            work_dir_path = remote.get_working_dir_path(repo_name)
             svc_mgr = ServiceManager(ssh)
 
             # Verify remote revision
@@ -178,5 +178,5 @@ def _sync_repo_to_remote(ssh: Any, deploy_path: str, push_command: Any, console:
 def persist_image_build_remote_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
     """Save resolved image-build-remote connection args for later runs."""
     args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "image-build-remote")
+    config.save_args(args_to_save, "image.build")
     return args_to_save

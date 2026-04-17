@@ -260,22 +260,22 @@ def render_service_skill(
 
         ## Command Workflow
 
-        1. Scaffold or refresh files:
-              `deploy svc init -n {service_name}{' --internal' if internal else f' -d {domain}'}`
+          1. Scaffold or refresh files:
+                  `deploy svc init -n {service_name}{' --internal' if internal else f' --domain {domain}'} --image {image_value}`
            This creates `Dockerfile`, `docker-compose.yml`, and this skill file.
            The compose file contains all routing and service configuration.
 
         2. Sync source to target when needed:
-           `deploy push`
-              Required before `deploy image build-remote`.
+              `deploy repo push`
+                  Required before `deploy image build`.
 
         3. Ensure ingress proxy is running:
            `deploy proxy up`
            Starts the Caddy reverse proxy that routes traffic to services.
 
           4. Deliver service image to target (choose one):
-              - `deploy image push -i {image_value}` for a pre-built local image.
-              - `deploy image build-remote -i {image_value}` to build on target from synced source.
+              - `deploy image push --image {image_value}` for a pre-built local image.
+              - `deploy image build --tag {image_value}` to build on target from synced source.
 
           5. Start service:
               `deploy svc up -n {service_name}`
@@ -310,9 +310,9 @@ def render_service_skill(
 
         - `deploy svc up` persists remote runtime metadata at `/tmp/deploy/repos/{service_name}.service/.deploy-service.json`.
         - Update routing by editing `docker-compose.yml` or re-running `svc init`.
-        - For code or dependency changes: run `deploy image build-remote -i {image_value}` and then `deploy svc up -n {service_name}`.
+        - For code or dependency changes: run `deploy image build --tag {image_value}` and then `deploy svc up -n {service_name}`.
         - Use `deploy svc down -n {service_name}` to stop without deleting remote metadata.
-        - For local development, set `--host localhost` to run workflows locally.
+        - For local development, set `--remote localhost` to run workflows locally.
         """
     )
 

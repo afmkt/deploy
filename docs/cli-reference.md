@@ -1,406 +1,159 @@
 # CLI Reference
 
-This reference is organized to match the code paths in main.py and the flow resolvers.
+This document reflects the current command contract defined in REQUIREMENT.md.
 
-## 1) Argument Resolution Model
+## Global Flags
 
-Connection arguments are resolved through shared helpers in deploy/session.py.
+```sh
+deploy --non-interactive <group> <command> [...options]
+```
 
-Resolution order for connection profile fields (host, port, username, key):
+- `--non-interactive`: Disable prompts and fail when required values cannot be resolved from CLI or config.
+- Configuration is stored in `.deploy/config.yml`.
+- Configuration uses nested sections such as `repo.push`, `image.push`, `proxy.up`, and `svc.init`.
+- Unknown keys in `.deploy/config.yml` are treated as errors.
+- Path-like config values such as `key` and `path` expand `~` on load.
 
-1. CLI input
-2. Saved config for the command section (when --use-config is enabled)
-3. Fallback command sections in this order: push, pull, docker-push, proxy, service, monitor
-4. Interactive prompts (only when interactive mode is enabled)
-5. Validation failure (non-interactive remote mode requires host and username)
+## Repository Commands
 
-Notes:
+### Push
 
-- Fallback only applies when the current command config is incomplete for a remote profile.
-- Local targets are skipped as remote fallback sources.
-- For port, default 22 is treated as unresolved and may be replaced by saved config.
-- Password is not loaded from saved config; it comes from CLI input (or interactive SSH prompt paths).
+```sh
+deploy repo push --remote <host> --port 22 --username <user> --key <ssh_key> --path ~/.deploy/repos
+```
 
-Path argument resolution:
+Useful options:
+- `--remote`: Target host. Use `localhost` to run locally.
+- `--path`: Remote deploy base path. Defaults to `~/.deploy/repos`.
+- `--repo-path`: Local repository path. Defaults to `.`.
+- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
+- `--dry-run`: Validate arguments and connectivity without performing the push.
 
-- push/pull repo_path and deploy_path use load_defaulted_value:
-  - if CLI value equals the command default, saved config value is used when present
-  - otherwise CLI value is used
-- image build-remote deploy_path uses this order:
-  1. --deploy-path
-  2. saved push deploy_path
-  3. interactive prompt default
-  4. failure in non-interactive mode
+Saved config section:
+- `repo.push`
 
-Config defaults by command:
+### Pull
 
-- push: --use-config defaults to false
-- pull: --use-config defaults to false
-- docker-push: --use-config defaults to false
-- image push/build-remote: --use-config defaults to true
-- proxy subcommands: --use-config defaults to true
-- svc up/status/down: --use-config defaults to true
-- monitor: --use-config defaults to true
+```sh
+deploy repo pull --remote <host> --port 22 --username <user> --key <ssh_key> --path ~/.deploy/repos
+```
 
-## 2) Argument Catalog
+Useful options:
+- `--commit/--no-commit`: Commit changes in the remote working directory before pulling.
+- `--sync-remote/--no-sync-remote`: Commit and push remote changes before pulling.
+- `--branch`: Pull into a specific branch.
+- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
+- `--dry-run`: Validate arguments and connectivity without performing the pull.
 
-## Connection arguments
+Saved config section:
+- `repo.pull`
 
-- --host, -h: Target host or IP
-- --port, -p: SSH port (used by most commands)
-- --ssh-port: SSH port used by svc up and image subcommands
-- --username, -u: SSH username
-- --key, -k: SSH private key path
-- --password: SSH password
-- --use-config/--no-use-config: Enable or disable config loading
-- --interactive/--no-interactive: Enable or disable prompts
+## Image Commands
 
-Resolution details:
+### Push
 
-- Present in push, pull, docker-push, image subcommands, proxy subcommands, svc up/status/down, monitor.
-- Resolved by PushArgumentResolver, PullArgumentResolver, DockerPushArgumentResolver, ProxyUpArgumentResolver, ServiceDeployArgumentResolver, and _build_connection_from_config.
+```sh
+deploy image push --image <image:tag> --remote <host> --username <user> --key <ssh_key>
+```
 
-## Repository and deploy-path arguments
+Useful options:
+- `--platform`: Override target platform.
+- `--registry-username`: Registry username for private images.
+- `--registry-password`: Registry password for private images.
+- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
+- `--dry-run`: Validate the image transfer path without sending the image.
 
-- --repo-path, -r: Local repository path (push, pull)
-- --deploy-path, -d: Remote deploy base path (push, pull)
-- --deploy-path: Remote deploy base path used by push/pull or image build-remote
-- --branch, -b: Pull target branch
-- --commit/--no-commit: Commit remote working directory changes before pull
-- --sync-remote/--no-sync-remote: Sync remote working tree through bare repo before pull
+Saved config section:
+- `image.push`
 
-## Image and registry arguments
+### Build
 
-- --image, -i: Docker image name:tag (docker-push, image push, image build-remote, svc init)
-- --platform: Target platform override for docker-push
-- --registry-username: Registry auth username for private pull
-- --registry-password: Registry auth password for private pull
+```sh
+deploy image build --tag <image:tag> --remote <host> --username <user> --key <ssh_key>
+```
 
-## Routing and ingress arguments
+Useful options:
+- `--tag`: Tag to assign to the built image.
+- `--path`: Remote deploy path used for the repo sync step.
+- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
-- --domain, -d: Public hostname for service routing (svc init)
-- --name, -n: Service name override
-- --port: Container app port (svc init)
-- --ingress-network (repeatable/comma-separated): Ingress networks
-- --global-ingress/--no-global-ingress: Attach service to all ingress networks
-- --path-prefix: Path-based route prefix
-- --internal: Internal-only service mode
-- --allow-remote-domain-fallback: Allow reading domain from target metadata when --domain is omitted
+Saved config section:
+- `image.build`
 
-## Proxy and monitor operational arguments
+## Proxy Commands
 
-- --migrate-native-caddy/--no-migrate-native-caddy: Native Caddy handoff behavior in proxy up
-- --lines: Log/diagnostic line count in proxy logs/diagnose
-- --refresh-interval: Monitor polling interval seconds
-- --log-lines: Monitor logs action line count
-- --command-timeout: SSH per-command timeout for monitor
-- --action-timeout: Overall monitor action timeout
+### Up
 
-## Config management arguments
+```sh
+deploy proxy up --remote <host> --username <user> --key <ssh_key> --network ingress --bootstrap
+```
 
-- clear-config: optional --command, -c with choices push or pull
+Useful options:
+- `--network`: Ingress network name. Repeat for multiple networks.
+- `--bootstrap/--no-bootstrap`: Enable or disable native Caddy bootstrap handoff.
+- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
-## 3) Command Catalog
+Saved config section:
+- `proxy.up`
 
-## Root commands
+### Status
 
-### deploy push
+```sh
+deploy proxy status
+```
 
-Operation:
+### Logs
 
-- Validates local repository
-- Ensures target repository layout
-- Pushes local changes to target bare repo
-- Updates saved push config on success
+```sh
+deploy proxy logs --lines 80
+```
 
-Arguments:
+### Down
 
-- --repo-path, -r (default: .)
-- --host, -h
-- --port, -p (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --deploy-path, -d (default: repos base path)
-- --interactive/--no-interactive (default: interactive)
-- --use-config/--no-use-config (default: no-use-config)
-- --dry-run
+```sh
+deploy proxy down
+```
 
-### deploy pull
+These commands resolve target connection settings through saved config when available.
 
-Operation:
+## Service Commands
 
-- Connects to target repository
-- Optionally commits/syncs remote working tree
-- Pulls remote changes into local repo
-- Updates saved pull config on success
+### Init
 
-Arguments:
+```sh
+deploy svc init --domain api.example.com --name api --image repo/api:latest --port 8000 --network ingress --global --path-prefix /api
+```
 
-- push arguments, plus:
-- --commit/--no-commit
-- --sync-remote/--no-sync-remote
-- --branch, -b
+Useful options:
+- `--image`: Required. Resolution order is CLI, then `svc.init` config, then prompt when interactive.
+- `--network`: External ingress network. Repeat for multiple networks.
+- `--global`: Join every configured ingress network.
+- `--path-prefix`: Route only traffic under this path prefix.
+- `--internal`: Generate an internal-only service with no public domain.
+- `--force`: Overwrite existing generated files.
 
-### deploy docker-push
+Saved config section:
+- `svc.init`
 
-Operation:
+### Up
 
-- Resolves target architecture
-- Pulls/saves local image tar for target platform
-- Transfers tar to target
-- Loads image on target
-- Updates saved docker-push config on success
+```sh
+deploy svc up --name api --remote <host> --username <user> --key <ssh_key>
+```
 
-Arguments:
+Saved config section:
+- `svc.up`
 
-- --image, -i (required)
-- --host, -h
-- --port, -p (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --platform
-- --registry-username
-- --registry-password
-- --interactive/--no-interactive (default: interactive)
-- --use-config/--no-use-config (default: no-use-config)
-- --dry-run
+### Status
 
-### deploy show-config
+```sh
+deploy svc status --name api
+```
 
-Operation:
+### Down
 
-- Prints saved command argument sets
+```sh
+deploy svc down --name api
+```
 
-Arguments:
-
-- none
-
-### deploy clear-config
-
-Operation:
-
-- Clears all saved config or one command section
-
-Arguments:
-
-- --command, -c (choices: push, pull)
-
-## Proxy command group
-
-### deploy proxy up
-
-Operation:
-
-- Ensures proxy prerequisites
-- Optionally migrates native Caddy
-- Starts or reconciles docker-caddy-proxy
-- Persists proxy connection args
-
-Arguments:
-
-- --host, -h
-- --port, -p (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-- --migrate-native-caddy/--no-migrate-native-caddy (default: migrate)
-- --ingress-network (repeatable)
-- --interactive/--no-interactive (default: interactive)
-
-### deploy proxy status
-
-Operation:
-
-- Shows proxy container status and health URL
-
-Arguments:
-
-- --host, -h
-- --port, -p (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-
-### deploy proxy down
-
-Operation:
-
-- Stops proxy stack
-
-Arguments:
-
-- Same as proxy status
-
-### deploy proxy logs
-
-Operation:
-
-- Shows recent proxy logs
-
-Arguments:
-
-- proxy status arguments
-- --lines (default: 80)
-
-### deploy proxy diagnose
-
-Operation:
-
-- Prints proxy status, logs, generated Caddyfile, bootstrap Caddyfile, and native Caddy diagnostics
-
-Arguments:
-
-- proxy status arguments
-- --lines (default: 80)
-
-## Service command group
-
-### deploy svc init
-
-Operation:
-
-- Detects FastAPI entrypoint
-- Generates Dockerfile and docker-compose.yml
-- Writes service skill file
-
-Arguments:
-
-- --domain, -d (required unless --internal)
-- --name, -n
-- --port
-- --image, -i
-- --ingress-network (repeatable)
-- --global-ingress/--no-global-ingress (default: no-global-ingress)
-- --path-prefix
-- --internal
-- --force
-
-### deploy svc up
-
-Operation:
-
-- Loads service routing/build intent from local docker-compose.yml
-- Ensures proxy is running
-- Verifies image exists on target (no implicit push/build)
-- Uploads compose and metadata
-- Starts service containers
-- Persists service connection args
-
-Arguments:
-
-- --name, -n
-- --host, -h
-- --ssh-port (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-
-## Image command group
-
-### deploy image push
-
-Operation:
-
-- Validates image exists locally
-- Transfers image to target and loads it
-- Persists image-push connection args
-
-Arguments:
-
-- --image, -i (required)
-- --platform
-- --registry-username
-- --registry-password
-- --host, -h
-- --ssh-port (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-- --interactive/--no-interactive (default: interactive)
-
-### deploy image build-remote
-
-Operation:
-
-- Validates local git repository
-- Syncs repository to target via deploy push
-- Verifies remote revision
-- Builds image on target from synced context
-- Persists image-build-remote connection args
-
-Arguments:
-
-- --image, -i (required)
-- --deploy-path
-- --host, -h
-- --ssh-port (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-- --interactive/--no-interactive (default: interactive)
-
-### deploy svc status
-
-Operation:
-
-- Shows service runtime status, route info, and recent logs
-
-Arguments:
-
-- --name, -n
-- --host, -h
-- --port, -p (default: 22)
-- --username, -u
-- --key, -k
-- --password
-- --use-config/--no-use-config (default: use-config)
-
-### deploy svc down
-
-Operation:
-
-- Stops/removes service containers for one service
-
-Arguments:
-
-- Same as svc status
-
-## Monitor command
-
-### deploy monitor
-
-Operation:
-
-- Starts TUI monitor for proxy/services/networks/resources
-- Persists monitor connection args
-
-Arguments:
-
-- --host
-- --port (default: 22)
-- --username
-- --key
-- --password
-- --use-config/--no-use-config (default: use-config)
-- --refresh-interval (default: 5)
-- --log-lines (default: 120)
-- --command-timeout (default: 10.0)
-- --action-timeout (default: 15.0)
-
-## 4) Notes for Future Commands
-
-To keep behavior consistent:
-
-1. Reuse shared connection resolution in deploy/session.py.
-2. Keep option names aligned with existing groups (host/port/username/key/password/use-config/interactive).
-3. Document defaults in Click decorators and this file together.
-4. Add new command arguments to this reference in both sections:
-   - Argument Catalog
-   - Command Catalog
+These commands resolve target connection settings through saved config when available.

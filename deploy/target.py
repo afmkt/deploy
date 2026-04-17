@@ -60,12 +60,12 @@ def construct_repo_url(repo_path: str, connection) -> str:
 
 
 def docker_push_args_for_connection(image: str, connection) -> list[str]:
-    """Build docker-push CLI arguments for the given target connection."""
+    """Build image-push CLI arguments for the given target connection."""
     args = [
         "--image",
         image,
-        "--no-interactive",
-        "--host",
+        "--non-interactive",
+        "--remote",
         "localhost" if is_local_connection(connection) else connection.host,
     ]
     if not is_local_connection(connection):
@@ -76,14 +76,14 @@ def docker_push_args_for_connection(image: str, connection) -> list[str]:
 
 
 def push_args_for_connection(repo_path: str, deploy_path: str, connection) -> list[str]:
-    """Build push CLI arguments for the given target connection."""
+    """Build repo-push CLI arguments for the given target connection."""
     args = [
         "--repo-path",
         repo_path,
-        "--deploy-path",
+        "--path",
         deploy_path,
-        "--no-interactive",
-        "--host",
+        "--non-interactive",
+        "--remote",
         "localhost" if is_local_connection(connection) else connection.host,
     ]
     if not is_local_connection(connection):

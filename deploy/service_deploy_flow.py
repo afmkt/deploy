@@ -53,7 +53,7 @@ class ServiceDeployArgumentResolver:
         profile: ConnectionProfile,
     ) -> ServiceDeployResolutionResult | None:
         completed_profile = resolve_connection_profile(
-            config, "service", profile, use_config=self.use_config
+            config, "svc.up", profile, use_config=self.use_config
         )
         if completed_profile is None:
             return None
@@ -205,7 +205,7 @@ def execute_service_deploy(
 def persist_service_deploy_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
     """Save resolved service-deploy connection args for later runs."""
     args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "service")
+    config.save_args(args_to_save, "svc.up")
     return args_to_save
 
 

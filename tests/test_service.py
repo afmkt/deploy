@@ -287,7 +287,7 @@ def test_render_service_skill_contains_profile_and_commands():
     assert "Path prefix: /api/auth" in skill
     assert "Ingress networks: ingress, app-a" in skill
     assert "deploy svc up -n auth-api" in skill
-    assert "deploy image build-remote -i auth-api:latest" in skill
+    assert "deploy image build --tag auth-api:latest" in skill
     assert "All service configuration is now sourced from `docker-compose.yml`" in skill
 
 

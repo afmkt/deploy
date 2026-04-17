@@ -60,7 +60,7 @@ class ImagePushArgumentResolver:
     ) -> ImagePushResolutionResult | None:
         completed_profile = resolve_connection_profile(
             config,
-            "image-push",
+            "image.push",
             profile,
             use_config=self.use_config,
         )
@@ -145,5 +145,5 @@ def execute_image_push(
 def persist_image_push_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
     """Save resolved image-push connection args for later runs."""
     args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "image-push")
+    config.save_args(args_to_save, "image.push")
     return args_to_save

@@ -176,7 +176,7 @@ def connection_args(profile: ConnectionProfile) -> dict[str, Any]:
     """Return config-safe connection args for persistence."""
     resolved = profile.resolved()
     return {
-        "host": resolved.host,
+        "remote": resolved.host,
         "port": resolved.port,
         "username": resolved.username,
         "key": resolved.key,
@@ -186,7 +186,7 @@ def connection_args(profile: ConnectionProfile) -> dict[str, Any]:
 def connection_args_from_connection(connection: Any) -> dict[str, Any]:
     """Return config-safe connection args using the active connection state."""
     return {
-        "host": getattr(connection, "host", ""),
+        "remote": getattr(connection, "host", ""),
         "port": getattr(connection, "port", DEFAULT_SSH_PORT),
         "username": getattr(connection, "username", ""),
         "key": getattr(connection, "key_filename", ""),
@@ -205,7 +205,8 @@ def load_defaulted_value(current: Any, default: Any, saved_args: Mapping[str, An
 # ---------------------------------------------------------------------------
 
 ALL_FALLBACK_SOURCES: tuple[str, ...] = (
-    "push", "pull", "docker-push", "proxy", "service", "monitor"
+    "repo.push", "repo.pull", "image.push", "image.build",
+    "proxy.up", "svc.up", "monitor._",
 )
 
 
@@ -261,7 +262,7 @@ def _needs_complete_remote_profile(saved_args: Mapping[str, Any]) -> bool:
 
 
 def _saved_host(saved_args: Mapping[str, Any]) -> str:
-    host = str(saved_args.get("host", ""))
+    host = str(saved_args.get("remote", ""))
     if host:
         return host
     if str(saved_args.get("target", "")).strip().lower() == "local":

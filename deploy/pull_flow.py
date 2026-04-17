@@ -73,7 +73,7 @@ class PullArgumentResolver:
     ) -> PullResolutionResult | None:
         profile_result = load_connection_profile(
             config,
-            "pull",
+            "repo.pull",
             profile,
             use_config=self.use_config,
             fallback_sources=ALL_FALLBACK_SOURCES,
@@ -85,7 +85,7 @@ class PullArgumentResolver:
             deploy_path,
             self.default_deploy_path,
             saved_args,
-            "deploy_path",
+            "path",
         )
         completed_profile = complete_connection_profile(profile_result.profile, self.interactive)
         if completed_profile is None:
@@ -207,9 +207,8 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
 def persist_pull_resolution(config: DeployConfig, context: PullExecutionContext) -> dict[str, Any]:
     """Save resolved pull arguments for later runs."""
     args_to_save: dict[str, Any] = {
-        "repo_path": context.repo_path,
-        "deploy_path": context.deploy_path,
+        "path": context.deploy_path,
     }
     args_to_save.update(connection_args(context.profile))
-    config.save_args(args_to_save, "pull")
+    config.save_args(args_to_save, "repo.pull")
     return args_to_save

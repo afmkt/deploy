@@ -60,7 +60,7 @@ class DockerPushArgumentResolver:
     ) -> DockerPushResolutionResult | None:
         completed_profile = resolve_connection_profile(
             config,
-            "docker-push",
+            "image.push",
             profile,
             use_config=self.use_config,
             interactive=self.interactive,
@@ -192,5 +192,5 @@ def persist_docker_push_resolution(
 ) -> dict[str, Any]:
     """Save resolved docker-push arguments for later runs."""
     args_to_save = connection_args(context.profile)
-    config.save_args(args_to_save, "docker-push")
+    config.save_args(args_to_save, "image.push")
     return args_to_save

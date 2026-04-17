@@ -51,24 +51,6 @@ class StatusSSH:
         return 0, "", ""
 
 
-def test_has_uncommitted_changes_true():
-    ssh = StatusSSH(status_output=" M app.py\n")
-    remote = RemoteServer(ssh, "/deploy")
-    assert remote.has_uncommitted_changes("/deploy/repo") is True
-
-
-def test_has_uncommitted_changes_error_returns_none():
-    ssh = StatusSSH(status_exit=1)
-    remote = RemoteServer(ssh, "/deploy")
-    assert remote.has_uncommitted_changes("/deploy/repo") is None
-
-
-def test_has_unpushed_commits_true():
-    ssh = StatusSSH(log_output="abc123 test commit\n")
-    remote = RemoteServer(ssh, "/deploy")
-    assert remote.has_unpushed_commits("/deploy/repo") is True
-
-
 def test_create_directory_quotes_path():
     ssh = StatusSSH()
     remote = RemoteServer(ssh, "/deploy")

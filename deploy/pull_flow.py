@@ -31,8 +31,6 @@ class PullExecutionContext:
     repo_path: str
     deploy_path: str
     profile: ConnectionProfile
-    commit: bool
-    sync_remote: bool
     branch: str | None
 
 
@@ -67,8 +65,6 @@ class PullArgumentResolver:
         repo_path: str,
         deploy_path: str,
         profile: ConnectionProfile,
-        commit: bool,
-        sync_remote: bool,
         branch: str | None,
     ) -> PullResolutionResult | None:
         profile_result = load_connection_profile(
@@ -99,8 +95,6 @@ class PullArgumentResolver:
                 repo_path=resolved_repo_path,
                 deploy_path=resolved_deploy_path,
                 profile=completed_profile,
-                commit=commit,
-                sync_remote=sync_remote,
                 branch=branch,
             ),
             used_saved_args=profile_result.used_saved_args,
@@ -138,47 +132,7 @@ def execute_pull(context: PullExecutionContext, console: Console, *, dry_run: bo
                 console.print(f"[red]✗ Deployment repository does not exist: {bare_repo_path}[/red]")
                 return False
 
-            if context.sync_remote:
-                console.print("\n[bold]Step 4: Checking if deployment working directory is clean[/bold]")
-                has_uncommitted = remote.has_uncommitted_changes(working_dir_path)
-                if has_uncommitted is None:
-                    return False
-
-                has_unpushed = remote.has_unpushed_commits(working_dir_path)
-                if has_unpushed is None:
-                    return False
-
-                if has_uncommitted or has_unpushed:
-                    if has_uncommitted:
-                        console.print("[yellow]Deployment working directory has uncommitted changes[/yellow]")
-                        console.print("\n[bold]Step 5: Committing changes in deployment working directory[/bold]")
-                        if not remote.commit_remote_changes(working_dir_path):
-                            console.print("[red]✗ Failed to commit changes in deployment working directory[/red]")
-                            return False
-
-                    if has_unpushed:
-                        console.print("[yellow]Deployment working directory has unpushed commits[/yellow]")
-
-                    console.print("\n[bold]Step 6: Pushing changes to bare repository[/bold]")
-                    if not remote.push_to_bare_repo(working_dir_path):
-                        console.print("[red]✗ Failed to push changes to bare repository[/red]")
-                        return False
-                else:
-                    console.print("[green]✓ Deployment working directory is clean and up to date[/green]")
-
-            elif context.commit:
-                console.print("\n[bold]Step 4: Committing changes in deployment working directory[/bold]")
-                if not remote.commit_remote_changes(working_dir_path):
-                    console.print("[red]✗ Failed to commit changes in deployment working directory[/red]")
-                    return False
-
-                console.print("\n[bold]Step 5: Pushing changes to bare repository[/bold]")
-                if not remote.push_to_bare_repo(working_dir_path):
-                    console.print("[red]✗ Failed to push changes to bare repository[/red]")
-                    return False
-
-            step_num = 7 if context.sync_remote else 6
-            console.print(f"\n[bold]Step {step_num}: Pulling from remote repository to local[/bold]")
+            console.print(f"\n[bold]Step 4: Pulling from remote repository to local[/bold]")
             remote_name = "deploy"
             bare_repo_url = construct_repo_url(bare_repo_path, ssh)
             if not repo.add_remote(remote_name, bare_repo_url):

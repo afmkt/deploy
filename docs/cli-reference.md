@@ -39,9 +39,10 @@ deploy repo pull --remote <host> --port 22 --username <user> --key <ssh_key> --p
 ```
 
 Useful options:
-- `--commit/--no-commit`: Commit changes in the remote working directory before pulling.
-- `--sync-remote/--no-sync-remote`: Commit and push remote changes before pulling.
-- `--branch`: Pull into a specific branch.
+- `--remote`: Target host. Use `localhost` to run locally.
+- `--path`: Remote deploy base path. Defaults to `~/.deploy/repos`.
+- `--repo-path`: Local repository path. Defaults to `.`.
+- `--branch`: Pull into a specific local branch.
 - `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 - `--dry-run`: Validate arguments and connectivity without performing the pull.
 

@@ -100,6 +100,7 @@ This generates:
 
 - `Dockerfile`
 - `docker-compose.yml`
+- `.github/skills/deploy-service/SKILL.md` — service-specific operating guidance
 
 The directory name becomes the service name. Override with `--name` on later
 commands if needed.
@@ -145,8 +146,10 @@ uploads the compose file, and starts the container. On success it prints routing
 information:
 
 ```
+Container state: running
 Route host: api.example.com
-Ingress access: curl -H "Host: api.example.com" http://localhost/<path>
+Metadata domain: api.example.com
+Ingress access: curl http://localhost/<path>   (or curl -H "Host: api.example.com" http://localhost/<path>)
 In-network access: http://myapp:8000/<path>
 ```
 
@@ -216,7 +219,7 @@ deploy proxy up \
   --network app-b
 ```
 
-Or equivalently with comma-separated values:
+Or on a single line:
 
 ```sh
 deploy proxy up --network app-a --network app-b
@@ -330,7 +333,7 @@ from containers explicitly added to the same network.
 
 ```sh
 deploy svc init --name session-store
-deploy image push -i session-store:latest
+deploy image push --image session-store:latest
 deploy svc up --name session-store
 ```
 
@@ -419,39 +422,18 @@ deploy proxy down
 When the remote working tree has been edited directly (e.g. hot-patched on the
 server), pull those changes back.
 
-**Simple pull (clean remote working tree):**
+**Pull from remote bare repository:**
 
 ```sh
 deploy repo pull --remote <host> --username <user> --key ~/.ssh/id_ed25519
 ```
 
-**Commit remote changes, then pull:**
-
-Use `--commit` when the remote working tree has uncommitted edits that should be
-preserved:
-
-```sh
-deploy repo pull --commit
-```
-
-This commits the remote edits in place before pulling so nothing is lost.
-
-**Full sync (remote edits not yet in the bare repo):**
-
-Use `--sync-remote` when the remote working directory contains changes that have
-not been pushed to the on-host bare repository yet:
-
-```sh
-deploy repo pull --sync-remote
-```
-
-This chains the steps automatically:
-1. Commits any uncommitted changes on the remote working tree.
-2. Pushes them from the remote working tree to the remote bare repo.
-3. Pulls from the bare repo to your local repository.
+The remote working directory must be clean (no uncommitted changes) before
+pulling. If it has uncommitted changes, commit or discard them manually on the
+remote before running this command.
 
 Pull into a specific local branch:
 
 ```sh
-deploy repo pull --sync-remote --branch hotfix/fix-upstream
+deploy repo pull --branch hotfix/fix-upstream
 ```

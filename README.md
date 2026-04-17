@@ -110,20 +110,12 @@ deploy repo pull --remote localhost --path ~/.deploy/repos
 Useful options:
 
 - `--branch <name>`: Pull into a specific local branch.
-- `--commit`: If the remote working directory has uncommitted changes, commit them on the remote before pulling.
-- `--sync-remote`: Sync remote working directory changes back through the remote bare repository before pulling locally. Use this when the server may contain edits that do not yet exist in your local repository.
 
 Examples:
 
 ```sh
 # Pull into a specific branch
 deploy repo pull --branch feature-x
-
-# Commit remote working tree changes before pulling
-deploy repo pull --commit
-
-# Fully sync remote working tree -> bare repo -> local repo
-deploy repo pull --sync-remote
 ```
 
 ### 3) Push Docker Image to Target
@@ -442,8 +434,6 @@ Pull a deployed repository back to local.
 | `--password` | | SSH password |
 | `--path` | `~/.deploy/repos` | Deploy path on target |
 | `--branch` | | Branch to pull into |
-| `--commit` | off | Commit remote working tree changes before pulling |
-| `--sync-remote` | off | Full sync: commit remote → push to bare → pull locally |
 | `--use-config/--no-use-config` | on | Load arguments from saved config |
 | `--dry-run` | off | Validate connection without pulling |
 

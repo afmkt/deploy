@@ -201,8 +201,6 @@ def repo_push(
 @with_connection_options()
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
-@click.option("--commit/--no-commit", default=False, show_default=True, help="Commit changes in the remote working directory.")
-@click.option("--sync-remote/--no-sync-remote", default=False, show_default=True, help="Commit and push remote changes before pulling.")
 @click.option("--branch", help="Branch name to pull to.")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without pulling.")
 @click.pass_context
@@ -215,8 +213,6 @@ def repo_pull(
     password: str | None,
     deploy_path: str,
     repo_path: str,
-    commit: bool,
-    sync_remote: bool,
     branch: str | None,
     use_config: bool,
     dry_run: bool,
@@ -235,8 +231,6 @@ def repo_pull(
         repo_path=repo_path,
         deploy_path=deploy_path,
         profile=_profile_from_options(remote, port, username, key, password),
-        commit=commit,
-        sync_remote=sync_remote,
         branch=branch,
     )
     if resolution and resolution.used_saved_args:

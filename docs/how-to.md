@@ -93,7 +93,7 @@ Run these steps once when introducing a service to a host for the first time.
 Inside the service repository root:
 
 ```sh
-deploy svc init -d api.example.com
+deploy svc init -d api.example.com --image <image:tag>
 ```
 
 This generates:
@@ -271,7 +271,7 @@ the prefix before forwarding, so the upstream service sees a clean path.
 
 ```sh
 # Inside the auth-ui repository
-deploy svc init -d auth.example.com --name auth-ui
+deploy svc init -d auth.example.com --name auth-ui --image auth-ui:latest
 deploy image build --tag auth-ui:latest
 deploy svc up --name auth-ui
 ```
@@ -280,7 +280,7 @@ deploy svc up --name auth-ui
 
 ```sh
 # Inside the auth-api repository
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 deploy image build --tag auth-api:latest
 deploy svc up --name auth-api
 ```
@@ -332,7 +332,7 @@ so it is reachable by name from other containers in the same compose project or
 from containers explicitly added to the same network.
 
 ```sh
-deploy svc init --name session-store
+deploy svc init --name session-store --image session-store:latest
 deploy image push --image session-store:latest
 deploy svc up --name session-store
 ```
@@ -377,7 +377,7 @@ deploy proxy up --remote localhost
 **Deploy a service locally:**
 
 ```sh
-deploy svc init -d localhost -n myapp
+deploy svc init -d localhost -n myapp --image myapp:latest
 deploy image build --tag myapp:latest --remote localhost
 deploy svc up --remote localhost
 ```

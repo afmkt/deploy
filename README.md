@@ -191,7 +191,7 @@ If old native services are proxied through rewritten host addresses, those servi
 Run inside your service directory:
 
 ```sh
-deploy svc init -d api.example.com
+deploy svc init -d api.example.com --image <image:tag>
 ```
 
 Useful options:
@@ -204,19 +204,19 @@ Useful options:
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --network app-a
+deploy svc init -d api.example.com --network app-a --image api:latest
 ```
 
 Example with a path prefix (API lives at `/api/auth` on a shared domain):
 
 ```sh
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 ```
 
 Example for an internal service (no public routing):
 
 ```sh
-deploy svc init --name session-store
+deploy svc init --name session-store --image session-store:latest
 ```
 
 This generates:
@@ -294,7 +294,7 @@ In-network access: http://<service-name>:8000/<path>
 Example with isolated app network:
 
 ```sh
-deploy svc init -d api.example.com --network app-a
+deploy svc init -d api.example.com --network app-a --image api:latest
 deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
 deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
@@ -302,7 +302,7 @@ deploy svc up --remote <host> --username <user> --key <ssh_key>
 Example with a globally exposed service:
 
 ```sh
-deploy svc init -d api.example.com --global
+deploy svc init -d api.example.com --global --image api:latest
 deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
 deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
@@ -315,11 +315,11 @@ prefixed services only handle requests under their path.
 
 ```sh
 # Auth UI — owns the domain root
-deploy svc init -d auth.example.com --name auth-ui
+deploy svc init -d auth.example.com --name auth-ui --image auth-ui:latest
 deploy svc up --name auth-ui --remote <host> --username <user> --key <ssh_key>
 
 # Auth API — owns /api/auth/* only; prefix is stripped before forwarding
-deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
+deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth --image auth-api:latest
 deploy svc up --name auth-api --remote <host> --username <user> --key <ssh_key>
 ```
 
@@ -334,7 +334,7 @@ exposed to the internet, omit `--domain` during `svc init`. No Caddy labels or i
 membership are added.
 
 ```sh
-deploy svc init --name session-store
+deploy svc init --name session-store --image session-store:latest
 deploy svc up --name session-store --remote <host> --username <user> --key <ssh_key>
 ```
 
@@ -381,7 +381,7 @@ routing for a different hostname than the current metadata records. Fix it by
 re-running `svc init` with the correct domain and then deploying:
 
 ```sh
-deploy svc init --name <service> -d <correct-host>
+deploy svc init --name <service> -d <correct-host> --image <image_name:tag>
 deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
 

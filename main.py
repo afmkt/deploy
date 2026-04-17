@@ -33,6 +33,7 @@ from deploy.service_deploy_flow import (
     ServiceDeployArgumentResolver,
     execute_service_deploy,
     persist_service_deploy_resolution,
+    print_service_status_block,
 )
 from deploy.service_init_flow import ServiceInitArgumentResolver, execute_service_init
 from deploy.session import (
@@ -365,14 +366,13 @@ def svc() -> None:
 
 
 @svc.command(name="init")
-@click.option("--domain", default=None, help="Public domain or hostname for this service.")
-@click.option("--name", help="Service name. Defaults to current directory name.")
+@click.option("--domain", "-d", default=None, help="Public domain or hostname for this service.")
+@click.option("--name", "-n", help="Service name. Defaults to current directory name.")
 @click.option("--port", type=int, help="App port inside the container.")
-@click.option("--image", help="Use a pre-built image.")
+@click.option("--image", "-i", help="Use a pre-built image.")
 @click.option("--network", "ingress_networks", multiple=True, help="External ingress network. Repeat to attach multiple networks.")
 @click.option("--global", "global_ingress", is_flag=True, default=False, help="Join every configured ingress network.")
 @click.option("--path-prefix", default=None, help="Route only traffic under this path prefix.")
-@click.option("--internal", is_flag=True, default=False, help="Make the service internal-only.")
 @click.option("--force", is_flag=True, help="Overwrite existing files.")
 @click.pass_context
 def service_init(
@@ -384,7 +384,6 @@ def service_init(
     ingress_networks: tuple[str, ...],
     global_ingress: bool,
     path_prefix: str | None,
-    internal: bool,
     force: bool,
 ) -> None:
     config = DeployConfig()
@@ -405,11 +404,10 @@ def service_init(
         ingress_networks=ingress_networks,
         global_ingress=global_ingress,
         path_prefix=path_prefix,
-        internal=internal,
         force=force,
     )
     if resolution is None:
-        raise click.UsageError("--domain is required unless --internal is set, and --image must be resolvable")
+        raise click.UsageError("--image is required unless it is available from config or interactive prompt")
 
     if not execute_service_init(resolution.context, console):
         sys.exit(1)
@@ -423,7 +421,6 @@ def service_init(
             "network": list(resolution.context.ingress_networks),
             "global": resolution.context.global_ingress,
             "path_prefix": resolution.context.path_prefix,
-            "internal": resolution.context.internal,
         },
         "svc.init",
     )
@@ -465,12 +462,7 @@ def service_status(service_name: str | None, remote: str | None, port: int, user
     try:
         with managed_connection(ssh):
             mgr = ServiceManager(ssh)
-            status = mgr.get_status(effective_service_name)
-            if status:
-                colour = "green" if status == "running" else "yellow"
-                console.print(f"[{colour}]Service '{effective_service_name}': {status}[/{colour}]")
-            else:
-                console.print(f"[yellow]Service '{effective_service_name}' not found on target[/yellow]")
+            print_service_status_block(effective_service_name, mgr, console)
     except ConnectionError:
         sys.exit(1)
 

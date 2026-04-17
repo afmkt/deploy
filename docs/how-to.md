@@ -43,7 +43,7 @@ deploy proxy up \
   --key ~/.ssh/id_ed25519
 ```
 
-On the first run this saves the connection to `~/.deploy/config.yaml`. All
+On the first run this saves the connection to `.deploy/config.yml`. All
 subsequent commands can use `--use-config` (which is the default for `proxy`
 subcommands) to skip repeating the flags.
 
@@ -59,20 +59,10 @@ deploy proxy status
 deploy proxy logs --lines 50
 ```
 
-**Troubleshoot a failed start:**
-
-```sh
-deploy proxy diagnose
-```
-
-This collects the proxy container logs, the generated Caddyfile, the bootstrap
-Caddyfile, and native Caddy journal output — all in one output.
-
 ### Native Caddy handoff
 
-If the host already runs native Caddy, `proxy up` detects it and prompts whether
-to migrate its Caddyfile and hand over ports 80/443 to docker-caddy-proxy. Accept
-to proceed; the tool:
+If the host already runs native Caddy, pass `--bootstrap` to `proxy up` to
+migrate its Caddyfile and hand over ports 80/443 to docker-caddy-proxy. The tool:
 
 1. Reads the existing Caddyfile.
 2. Rewrites any loopback upstreams (`localhost`, `127.0.0.1`, etc.) to the
@@ -82,7 +72,7 @@ to proceed; the tool:
 4. Stops native Caddy.
 5. Starts docker-caddy-proxy.
 
-If the migration is not wanted, pass `--no-bootstrap`.
+Omit `--bootstrap` (the default) if migration is not wanted.
 
 **Important:** services that native Caddy was proxying via loopback must listen
 on `0.0.0.0:<port>` (not `127.0.0.1:<port>`) to be reachable from inside a
@@ -255,7 +245,7 @@ A service that must be reachable regardless of how the proxy's network list
 changes can be marked global during `svc init`:
 
 ```sh
-deploy svc init -i shared:latest -d shared.example.com --global-ingress
+deploy svc init -i shared:latest -d shared.example.com --global
 deploy image push --image shared:latest
 deploy svc up
 ```
@@ -335,19 +325,19 @@ supplied value are normalised before the label is written.
 Some services (caches, databases, background workers, sidecars) must be
 reachable by other containers but must not be exposed to the internet.
 
-Pass `--internal` to `svc init` to suppress all Caddy labels and ingress network membership.
+Omit `--domain` from `svc init` to suppress all Caddy labels and ingress network membership.
 The container joins only the default project network created by Docker Compose,
 so it is reachable by name from other containers in the same compose project or
 from containers explicitly added to the same network.
 
 ```sh
-deploy svc init --name session-store --internal
+deploy svc init --name session-store
 deploy image push -i session-store:latest
 deploy svc up --name session-store
 ```
 
-`--domain` is not required for internal services.  If omitted, the service name
-is used as a placeholder in metadata so reconciliation stays consistent.
+With no domain, the service name is used as a placeholder in metadata so
+reconciliation stays consistent.
 
 The generated compose file contains no `caddy.*` labels and no `networks:`
 section:
@@ -374,7 +364,7 @@ SSH.
 **Push source locally:**
 
 ```sh
-deploy repo push --remote localhost --path /tmp/deploy/repos
+deploy repo push --remote localhost --path ~/.deploy/repos
 ```
 
 **Start the proxy locally:**

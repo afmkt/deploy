@@ -261,7 +261,7 @@ def render_service_skill(
         ## Command Workflow
 
           1. Scaffold or refresh files:
-                  `deploy svc init -n {service_name}{' --internal' if internal else f' --domain {domain}'} --image {image_value}`
+                  `deploy svc init -n {service_name}{'' if internal else f' --domain {domain}'} --image {image_value}`
            This creates `Dockerfile`, `docker-compose.yml`, and this skill file.
            The compose file contains all routing and service configuration.
 

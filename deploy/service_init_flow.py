@@ -65,14 +65,12 @@ class ServiceInitArgumentResolver:
         ingress_networks: tuple[str, ...],
         global_ingress: bool,
         path_prefix: str | None,
-        internal: bool,
         force: bool,
     ) -> ServiceInitResolutionResult | None:
         project_dir = Path(".")
         service_name = name or project_dir.resolve().name
 
-        if not domain and not internal:
-            return None
+        internal = not bool(domain)
 
         if not image:
             return None
@@ -122,7 +120,7 @@ class ServiceInitArgumentResolver:
             ResolvedArgument(
                 name="internal",
                 value=str(internal).lower(),
-                origin="cli (--internal)" if internal else "default (false)",
+                origin="derived (no --domain provided)" if internal else "derived (--domain provided)",
             ),
             ResolvedArgument(
                 name="force",
@@ -233,7 +231,7 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
     console.print("\n[bold]3. Most likely customization points[/bold]")
     console.print("  - Dockerfile: runtime base image, dependency install strategy, startup command")
     console.print("  - docker-compose.yml: image/build mode, labels/routing, env vars, mounts, restart policy")
-    console.print("  - Flags to rerun with: --path-prefix, --network, --global, --internal, --force")
+    console.print("  - Flags to rerun with: --path-prefix, --network, --global, --force")
 
     suggested_image = context.image or f"{context.service_name}:latest"
     next_command = (

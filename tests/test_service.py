@@ -390,7 +390,7 @@ def test_upload_compose_success():
     ssh = DummySSH(responses=[(0, "", "")])
     result = ServiceManager(ssh).upload_compose("mysvc", "version: '3.8'\n")
     assert result is True
-    assert "/tmp/deploy/repos/mysvc.service/docker-compose.yml" in ssh.executed[0]
+    assert "~/.deploy/repos/mysvc.service/docker-compose.yml" in ssh.executed[0]
 
 
 def test_upload_compose_failure():
@@ -442,7 +442,7 @@ def test_remove_success():
     assert result is True
     assert "docker compose" in ssh.executed[0]
     assert " down" in ssh.executed[0]
-    assert ssh.executed[1] == "rm -rf /tmp/deploy/repos/mysvc.service"
+    assert ssh.executed[1] == "rm -rf '~/.deploy/repos/mysvc.service'"
 
 
 def test_remove_stops_on_compose_down_failure():
@@ -615,3 +615,77 @@ def test_build_image_from_context_failure():
     ssh = DummySSH(responses=[(1, "", "no such file: Dockerfile")])
     result = ServiceManager(ssh).build_image_from_context("myimage:tag", "/tmp/deploy/repos/myrepo")
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# print_service_status_block
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+from rich.console import Console
+from io import StringIO
+
+from deploy.service_deploy_flow import print_service_status_block
+
+
+def _make_console() -> tuple[Console, StringIO]:
+    buf = StringIO()
+    return Console(file=buf, highlight=False, markup=False), buf
+
+
+def test_print_service_status_block_not_found():
+    ssh = DummySSH(responses=[(1, "", "")])  # get_status returns None
+    console, buf = _make_console()
+    print_service_status_block("mysvc", ServiceManager(ssh), console)
+    assert "not found" in buf.getvalue()
+
+
+def test_print_service_status_block_running_shows_state():
+    metadata = _json.dumps({"domain": "api.example.com", "port": 8000, "internal": False})
+    ssh = DummySSH(responses=[
+        (0, "running\n", ""),       # get_status
+        (0, "api.example.com\n", ""),  # get_routed_site_label (via get_routed_host)
+        (0, metadata, ""),          # read_service_metadata
+        (0, "log line 1\n", ""),    # get_logs
+    ])
+    console, buf = _make_console()
+    print_service_status_block("mysvc", ServiceManager(ssh), console)
+    out = buf.getvalue()
+    assert "running" in out
+    assert "Route host: api.example.com" in out
+    assert "Metadata domain: api.example.com" in out
+    assert "Ingress access:" in out
+    assert "In-network access: http://mysvc:8000/" in out
+
+
+def test_print_service_status_block_mismatch_warning():
+    metadata = _json.dumps({"domain": "old.example.com", "port": 8000, "internal": False})
+    ssh = DummySSH(responses=[
+        (0, "running\n", ""),           # get_status
+        (0, "new.example.com\n", ""),   # get_routed_site_label
+        (0, metadata, ""),              # read_service_metadata
+        (0, "", ""),                    # get_logs (empty)
+    ])
+    console, buf = _make_console()
+    print_service_status_block("mysvc", ServiceManager(ssh), console)
+    out = buf.getvalue()
+    assert "new.example.com" in out
+    assert "old.example.com" in out
+    assert "does not match" in out
+
+
+def test_print_service_status_block_internal_no_ingress_hint():
+    metadata = _json.dumps({"domain": "mysvc", "port": 6379, "internal": True})
+    ssh = DummySSH(responses=[
+        (0, "running\n", ""),    # get_status
+        (0, "", ""),             # get_routed_site_label (none — internal)
+        (0, metadata, ""),       # read_service_metadata
+        (0, "", ""),             # get_logs
+    ])
+    console, buf = _make_console()
+    print_service_status_block("mysvc", ServiceManager(ssh), console)
+    out = buf.getvalue()
+    assert "running" in out
+    assert "Ingress access" not in out
+    assert "In-network access: http://mysvc:6379/" in out

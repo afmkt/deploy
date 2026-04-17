@@ -21,7 +21,7 @@ This repository is prepared for open-source use as a binary CLI tool.
 - Proxy operation is bridge-mode only.
 - `service` command group scaffolds and deploys Docker-based services. Domain routing is explicit and fail-safe.
 - Path-based routing allows multiple services to share one domain via `--path-prefix`.
-- Internal-only services (caches, sidecars) can be deployed with `--internal` to suppress public routing.
+- Internal-only services (caches, sidecars) can be deployed without `--domain` to suppress public routing.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ Global options:
 ### 1) Git Push to Remote
 
 ```sh
-deploy repo push --remote <host> --username <user> --key <ssh_key> --path /tmp/deploy/repos
+deploy repo push --remote <host> --username <user> --key <ssh_key> --path ~/.deploy/repos
 ```
 
 Use saved config on later runs:
@@ -92,19 +92,19 @@ deploy repo push --use-config
 Run the same workflow on the local machine:
 
 ```sh
-deploy repo push --remote localhost --path /tmp/deploy/repos
+deploy repo push --remote localhost --path ~/.deploy/repos
 ```
 
 ### 2) Git Pull from Remote
 
 ```sh
-deploy repo pull --remote <host> --username <user> --key <ssh_key> --path /tmp/deploy/repos
+deploy repo pull --remote <host> --username <user> --key <ssh_key> --path ~/.deploy/repos
 ```
 
 Local target example:
 
 ```sh
-deploy repo pull --remote localhost --path /tmp/deploy/repos
+deploy repo pull --remote localhost --path ~/.deploy/repos
 ```
 
 Useful options:
@@ -157,7 +157,6 @@ Commands:
 deploy proxy up --use-config
 deploy proxy status --use-config
 deploy proxy logs --use-config --lines 120
-deploy proxy diagnose --use-config
 deploy proxy down --use-config
 ```
 
@@ -185,7 +184,7 @@ When `proxy up` detects native Caddy and bootstrap handoff is enabled:
 1. Reads native Caddyfile.
 2. Leaves the original native Caddy config file unchanged.
 3. Rewrites loopback upstreams (`localhost`, `127.0.0.1`, `127.0.1.1`, `[::1]`) to a bridge-reachable host address in the generated bootstrap content.
-4. Writes bootstrap file `/tmp/deploy/caddy-proxy/Caddyfile`.
+4. Writes bootstrap file `~/.deploy/repos/docker-caddy-proxy.service/Caddyfile`.
 5. Stops native Caddy service so docker-caddy-proxy can bind ports `80` and `443`.
 6. Starts docker-caddy-proxy.
 
@@ -206,9 +205,9 @@ deploy svc init -d api.example.com
 Useful options:
 
 - `--network <name>`: External network that this service joins for caddy routing (default: `ingress`).
-- `--global-ingress`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
+- `--global`: Mark the service as globally exposed so it joins every ingress network configured on the proxy.
 - `--path-prefix <path>`: Route only traffic under this path prefix on the shared domain (e.g. `/api/auth`). Allows multiple services to share one domain via path-based routing.
-- `--internal`: Mark the service as internal-only — no Caddy labels, no ingress network. The container is reachable only by other containers on the same Docker network. `--domain` is optional when `--internal` is set.
+- When `--domain` is not specified, the service is internal-only — no Caddy labels, no ingress network. The container is reachable only by other containers on the same Docker network.
 
 Example with isolated app network:
 
@@ -225,11 +224,12 @@ deploy svc init -d auth.example.com --name auth-api --path-prefix /api/auth
 Example for an internal service (no public routing):
 
 ```sh
-deploy svc init --name session-store --internal
+deploy svc init --name session-store
 ```
 
 This generates:
 
+- `.deploy/config.yml` - configuration file
 - `Dockerfile`
 - `docker-compose.yml`
 - `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance
@@ -310,7 +310,7 @@ deploy svc up --remote <host> --username <user> --key <ssh_key>
 Example with a globally exposed service:
 
 ```sh
-deploy svc init -d api.example.com --global-ingress
+deploy svc init -d api.example.com --global
 deploy image build --tag api:latest --remote <host> --username <user> --key <ssh_key>
 deploy svc up --remote <host> --username <user> --key <ssh_key>
 ```
@@ -338,11 +338,11 @@ upstream, so the service sees `/login` for an incoming `/api/auth/login` request
 ### Internal Services — No Public Routing
 
 For caches, databases, background workers, and other containers that must not be
-exposed to the internet, use `--internal` during `svc init`. No Caddy labels or ingress network
+exposed to the internet, omit `--domain` during `svc init`. No Caddy labels or ingress network
 membership are added.
 
 ```sh
-deploy svc init --name session-store --internal
+deploy svc init --name session-store
 deploy svc up --name session-store --remote <host> --username <user> --key <ssh_key>
 ```
 
@@ -415,7 +415,7 @@ The monitor accepts the same `--remote`, `--port`, `--username`, `--key`, `--pas
 Saved config file:
 
 ```text
-~/.deploy/config.yaml
+.deploy/config.yml
 ```
 
 Notes:
@@ -439,7 +439,7 @@ Sync a local Git repository to the deployment target.
 | `--username` | | SSH username |
 | `--key` | | Path to SSH private key |
 | `--password` | | SSH password (not recommended) |
-| `--path` | `/tmp/deploy/repos` | Deploy path on target |
+| `--path` | `~/.deploy/repos` | Deploy path on target |
 | `--use-config/--no-use-config` | on | Load arguments from saved config |
 | `--dry-run` | off | Validate connection without pushing |
 
@@ -457,7 +457,7 @@ Pull a deployed repository back to local.
 | `--username` | | SSH username |
 | `--key` | | Path to SSH private key |
 | `--password` | | SSH password |
-| `--path` | `/tmp/deploy/repos` | Deploy path on target |
+| `--path` | `~/.deploy/repos` | Deploy path on target |
 | `--branch` | | Branch to pull into |
 | `--commit` | off | Commit remote working tree changes before pulling |
 | `--sync-remote` | off | Full sync: commit remote → push to bare → pull locally |
@@ -506,14 +506,13 @@ Scaffold `Dockerfile`, `docker-compose.yml`, and a service skill file in the cur
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--domain` | `-d` | *(required)* | Public hostname for caddy routing |
+| `--domain` | `-d` | *(optional)* | Public hostname for caddy routing (omit for internal-only) |
 | `--name` | `-n` | *(current dir)* | Service name |
 | `--port` | | *(auto-detect)* | App port inside container |
 | `--image` | `-i` | | Use a pre-built image instead of a build directive |
 | `--network` | | `ingress` | External network for routing (repeatable) |
-| `--global-ingress` | | off | Join every configured ingress network |
+| `--global` | | off | Join every configured ingress network |
 | `--path-prefix` | | | Route only traffic under this path prefix |
-| `--internal` | | off | Internal-only service; no public routing |
 | `--force` | | off | Overwrite existing `Dockerfile` / `docker-compose.yml` |
 
 #### `deploy svc up`

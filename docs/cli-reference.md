@@ -129,7 +129,7 @@ Useful options:
 - `--network`: External ingress network. Repeat for multiple networks.
 - `--global`: Join every configured ingress network.
 - `--path-prefix`: Route only traffic under this path prefix.
-- `--internal`: Generate an internal-only service with no public domain.
+- When `--domain` is not specified, the service is internal-only with no public routing.
 - `--force`: Overwrite existing generated files.
 
 Saved config section:

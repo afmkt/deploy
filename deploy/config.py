@@ -31,7 +31,7 @@ CONFIG_SCHEMA: dict[str, dict[str, frozenset[str]]] = {
         "logs": _CONNECTION_KEYS,
     },
     "svc": {
-        "init": frozenset({"image", "domain", "name", "port", "network", "global", "path_prefix", "internal"}),
+        "init": frozenset({"image", "domain", "name", "port", "network", "global", "path_prefix"}),
         "up": _CONNECTION_KEYS,
         "status": _CONNECTION_KEYS,
         "down": _CONNECTION_KEYS,

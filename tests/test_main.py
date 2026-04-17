@@ -155,7 +155,7 @@ def test_service_init_uses_saved_image(monkeypatch):
                 ingress_networks=tuple(kwargs["ingress_networks"]),
                 global_ingress=kwargs["global_ingress"],
                 path_prefix=kwargs["path_prefix"],
-                internal=kwargs["internal"],
+                internal=not bool(kwargs["domain"]),
             ))
 
     monkeypatch.setattr(main_module, "ServiceInitArgumentResolver", FakeResolver)
@@ -163,7 +163,7 @@ def test_service_init_uses_saved_image(monkeypatch):
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda self, section: {"image": "repo/app:latest"})
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
 
-    result = runner.invoke(service, ["init", "--internal"])
+    result = runner.invoke(service, ["init"])
 
     assert result.exit_code == 0
     assert called["image"] == "repo/app:latest"
@@ -171,10 +171,50 @@ def test_service_init_uses_saved_image(monkeypatch):
 
 def test_service_init_requires_image_in_non_interactive_mode():
     runner = CliRunner()
-    result = runner.invoke(cli, ["--non-interactive", "svc", "init", "--internal"])
+    result = runner.invoke(cli, ["--non-interactive", "svc", "init"])
 
     assert result.exit_code == 2
     assert "--image is required" in result.output
+
+
+def test_service_init_no_domain_means_internal(monkeypatch):
+    """Omitting --domain must make internal=True (derived, no --internal flag needed)."""
+    runner = CliRunner()
+    resolved = {}
+
+    class FakeResolver:
+        def resolve(self, **kwargs):
+            resolved["domain"] = kwargs["domain"]
+            resolved["internal_derived"] = not bool(kwargs["domain"])
+            return SimpleNamespace(context=SimpleNamespace(
+                image=kwargs["image"],
+                domain=kwargs["domain"],
+                service_name="mysvc",
+                port=8000,
+                ingress_networks=(),
+                global_ingress=False,
+                path_prefix=None,
+                internal=not bool(kwargs["domain"]),
+            ))
+
+    monkeypatch.setattr(main_module, "ServiceInitArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_service_init", lambda *args, **kwargs: True)
+    monkeypatch.setattr("deploy.config.DeployConfig.load_args", lambda self, section: {"image": "store:latest"})
+    monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
+
+    result = runner.invoke(service, ["init", "--name", "mysvc"])
+
+    assert result.exit_code == 0
+    assert resolved["domain"] is None
+    assert resolved["internal_derived"] is True
+
+
+def test_service_init_rejects_internal_flag():
+    """--internal must no longer exist as a CLI option."""
+    runner = CliRunner()
+    result = runner.invoke(cli, ["svc", "init", "--internal"])
+    assert result.exit_code == 2
+    assert "No such option" in result.output
 
 
 def test_service_up_uses_remote_flag(monkeypatch):

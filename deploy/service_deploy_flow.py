@@ -185,21 +185,76 @@ def execute_service_deploy(
             if not svc_mgr.compose_up(service_name):
                 return False, None
 
-            status = svc_mgr.get_status(service_name)
-            container_ip = svc_mgr.get_container_ip(service_name)
-
             console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
-            console.print(f"  Domain : {domain}")
-            if path_prefix:
-                console.print(f"  Path   : {path_prefix}")
-            console.print(f"  Status : {status}")
-            console.print(f"  Exposure: {'internal' if internal else 'global' if global_ingress else 'single-network'}")
-            if container_ip:
-                console.print(f"  Container IP: {container_ip}")
+            print_service_status_block(service_name, svc_mgr, console)
 
             return True, ssh
     except ConnectionError:
         return False, None
+
+
+def print_service_status_block(
+    service_name: str,
+    svc_mgr: ServiceManager,
+    console: Console,
+) -> None:
+    """Print the standardised svc status block to console.
+
+    Output format (per REQUIREMENT.md):
+        Route host: <caddy label on running container>
+        Metadata domain: <persisted domain from .deploy-service.json>
+        Ingress access: curl ...
+        In-network access: http://<service>:<port>/
+        [warning if route host != metadata domain]
+        [recent container logs]
+    """
+    container_state = svc_mgr.get_status(service_name)
+    if not container_state:
+        console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
+        return
+
+    colour = "green" if container_state == "running" else "yellow"
+    console.print(f"[{colour}]Container state: {container_state}[/{colour}]")
+
+    route_host = svc_mgr.get_routed_host(service_name)
+    metadata = svc_mgr.read_service_metadata(service_name)
+    metadata_domain: str | None = metadata.get("domain") if metadata else None
+    port: int = int(metadata.get("port", 0)) if metadata else 0
+    internal: bool = bool(metadata.get("internal", False)) if metadata else False
+
+    if route_host:
+        console.print(f"Route host: {route_host}")
+    else:
+        console.print("[dim]Route host: (none — internal service or container not running)[/dim]")
+
+    if metadata_domain:
+        console.print(f"Metadata domain: {metadata_domain}")
+    else:
+        console.print("[dim]Metadata domain: (none)[/dim]")
+
+    if not internal and route_host:
+        if route_host in ("localhost", "127.0.0.1"):
+            ingress_hint = f"curl http://localhost/<path>"
+        else:
+            ingress_hint = (
+                f"curl http://localhost/<path>   "
+                f"(or curl -H \"Host: {route_host}\" http://localhost/<path>)"
+            )
+        console.print(f"Ingress access: {ingress_hint}")
+
+    if port:
+        console.print(f"In-network access: http://{service_name}:{port}/<path>")
+
+    if route_host and metadata_domain and route_host != metadata_domain:
+        console.print(
+            f"\n[yellow]⚠ Route host ({route_host}) does not match metadata domain "
+            f"({metadata_domain}). Re-run svc init with the correct domain and redeploy.[/yellow]"
+        )
+
+    logs = svc_mgr.get_logs(service_name, lines=20)
+    if logs.strip():
+        console.print("\n[bold]Recent logs:[/bold]")
+        console.print(logs.rstrip())
 
 
 def persist_service_deploy_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:

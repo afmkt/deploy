@@ -59,8 +59,8 @@ def construct_repo_url(repo_path: str, connection) -> str:
     return f"ssh://{connection.username}@{connection.host}:{connection.port}{repo_path}"
 
 
-def docker_push_args_for_connection(image: str, connection) -> list[str]:
-    """Build image-push CLI arguments for the given target connection."""
+def image_push_args_for_connection(image: str, connection) -> list[str]:
+    """Build `image push` CLI arguments for the given target connection."""
     args = [
         "--image",
         image,

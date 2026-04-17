@@ -494,7 +494,7 @@ def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
 
     monkeypatch.setattr("deploy.config.DeployConfig.load_args", fake_load_args)
     monkeypatch.setattr("deploy.config.DeployConfig.save_args", lambda *args, **kwargs: None)
-    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.json")
+    monkeypatch.setattr("deploy.config.DeployConfig.get_config_path", lambda self: ".deploy/config.yaml")
     monkeypatch.setattr(
         main_module,
         "execute_image_push",

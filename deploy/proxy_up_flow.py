@@ -18,7 +18,7 @@ from .session import (
     managed_connection,
     resolve_connection_profile,
 )
-from .target import display_target, docker_push_args_for_connection
+from .target import display_target, image_push_args_for_connection
 from .ingress import normalize_ingress_networks
 
 
@@ -70,7 +70,7 @@ class ProxyUpArgumentResolver:
         )
 
 
-def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_push_command: Any) -> tuple[bool, Any | None]:
+def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, image_push_command: Any) -> tuple[bool, Any | None]:
     """Execute deploy proxy up using fully resolved arguments."""
     ssh = build_connection(context.profile)
 
@@ -116,7 +116,7 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
                 console.print(f"[yellow]Image {PROXY_IMAGE} not found on remote host.[/yellow]")
                 if context.interactive:
                     should_push_image = Confirm.ask(
-                        f"Push {PROXY_IMAGE} to remote host now using docker-push?",
+                        f"Push {PROXY_IMAGE} to remote host now using image push?",
                         default=True,
                     )
                 else:
@@ -127,16 +127,16 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, docker_
 
                     runner = CliRunner()
                     result = runner.invoke(
-                        docker_push_command,
-                        docker_push_args_for_connection(PROXY_IMAGE, ssh),
+                        image_push_command,
+                        image_push_args_for_connection(PROXY_IMAGE, ssh),
                         catch_exceptions=False,
                         standalone_mode=False,
                     )
                     if result.exit_code != 0:
-                        console.print("[red]✗ docker-push failed[/red]")
+                        console.print("[red]✗ image push failed[/red]")
                         return False, None
                 else:
-                    console.print(f"[yellow]Run: deploy docker-push -i {PROXY_IMAGE} first[/yellow]")
+                    console.print(f"[yellow]Run: deploy image push --image {PROXY_IMAGE} first[/yellow]")
                     return False, None
             else:
                 console.print(f"[green]✓ Image {PROXY_IMAGE} found on remote host[/green]")

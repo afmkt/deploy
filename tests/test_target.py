@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
-from deploy.target import docker_push_args_for_connection, push_args_for_connection
+from deploy.target import image_push_args_for_connection, push_args_for_connection
 
 
-def test_docker_push_args_for_remote_connection():
+def test_image_push_args_for_remote_connection():
     connection = SimpleNamespace(
         is_local=False,
         host="example.com",
@@ -12,7 +12,7 @@ def test_docker_push_args_for_remote_connection():
         key_filename="/tmp/key",
     )
 
-    assert docker_push_args_for_connection("repo/app:latest", connection) == [
+    assert image_push_args_for_connection("repo/app:latest", connection) == [
         "--image",
         "repo/app:latest",
         "--non-interactive",

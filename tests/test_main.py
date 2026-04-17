@@ -217,19 +217,17 @@ def test_image_build_uses_tag_and_build_command(monkeypatch):
                     image=kwargs["image"],
                     deploy_path=kwargs["deploy_path"],
                     profile=kwargs["profile"],
-                    interactive=kwargs["interactive"],
-                    use_config=False,
                 )
             )
 
-    def fake_execute(context, console, *, config, push_command):
+    def fake_execute(context, console, *, push_command):
         calls["image"] = context.image
         calls["push_command"] = push_command
         return True, SimpleNamespace(host="localhost", port=22, username="tester", key_filename=None)
 
-    monkeypatch.setattr(main_module, "ImageBuildRemoteArgumentResolver", FakeResolver)
-    monkeypatch.setattr(main_module, "execute_image_build_remote", fake_execute)
-    monkeypatch.setattr(main_module, "persist_image_build_remote_resolution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_module, "ImageBuildArgumentResolver", FakeResolver)
+    monkeypatch.setattr(main_module, "execute_image_build", fake_execute)
+    monkeypatch.setattr(main_module, "persist_image_build_resolution", lambda *args, **kwargs: None)
 
     result = runner.invoke(image, [
         "build",

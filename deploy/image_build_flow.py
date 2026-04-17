@@ -1,4 +1,4 @@
-"""Image build-remote workflow: sync repo and build Docker image on remote host."""
+"""Image build workflow: sync repo and build a Docker image on the target host."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from .session import (
     build_connection,
     connection_args_from_connection,
     managed_connection,
+    resolve_path_arg,
     resolve_connection_profile,
 )
 from .target import display_target, push_args_for_connection
@@ -27,25 +28,23 @@ console = Console()
 
 
 @dataclass(slots=True)
-class ImageBuildRemoteExecutionContext:
-    """Fully resolved arguments required to execute deploy image build-remote."""
+class ImageBuildExecutionContext:
+    """Fully resolved arguments required to execute `deploy image build`."""
 
     image: str
-    deploy_path: str | None
+    deploy_path: str
     profile: ConnectionProfile
-    interactive: bool
-    use_config: bool
 
 
 @dataclass(slots=True)
-class ImageBuildRemoteResolutionResult:
-    """Resolved image-build-remote execution context plus config metadata."""
+class ImageBuildResolutionResult:
+    """Resolved image-build execution context plus config metadata."""
 
-    context: ImageBuildRemoteExecutionContext
+    context: ImageBuildExecutionContext
 
 
-class ImageBuildRemoteArgumentResolver:
-    """Resolve image-build-remote arguments from CLI input and config fallback."""
+class ImageBuildArgumentResolver:
+    """Resolve image-build arguments from CLI input and config fallback."""
 
     def __init__(self, *, use_config: bool):
         self.use_config = use_config
@@ -56,34 +55,43 @@ class ImageBuildRemoteArgumentResolver:
         *,
         image: str,
         deploy_path: str | None,
+        default_deploy_path: str,
         profile: ConnectionProfile,
         interactive: bool,
-    ) -> ImageBuildRemoteResolutionResult | None:
+    ) -> ImageBuildResolutionResult | None:
         completed_profile = resolve_connection_profile(
             config, "image.build", profile, use_config=self.use_config
         )
         if completed_profile is None:
             return None
 
-        return ImageBuildRemoteResolutionResult(
-            context=ImageBuildRemoteExecutionContext(
+        saved_args = config.load_args("repo.push") if self.use_config else {}
+        resolved_deploy_path = resolve_path_arg(
+            deploy_path or default_deploy_path,
+            default_deploy_path,
+            saved_args,
+            "path",
+        )
+        if interactive and resolved_deploy_path == default_deploy_path:
+            from .utils import prompt_deploy_path
+            resolved_deploy_path = prompt_deploy_path()
+
+        return ImageBuildResolutionResult(
+            context=ImageBuildExecutionContext(
                 image=image,
-                deploy_path=deploy_path,
+                deploy_path=resolved_deploy_path,
                 profile=completed_profile,
-                interactive=interactive,
-                use_config=self.use_config,
             )
         )
 
 
-def execute_image_build_remote(
-    context: ImageBuildRemoteExecutionContext,
+def execute_image_build(
+    context: ImageBuildExecutionContext,
     console: Console,
     *,
-    config: DeployConfig,
     push_command: Any,
 ) -> tuple[bool, Any | None]:
-    """Execute deploy image build-remote: sync repo and build on remote host."""
+    """Execute `deploy image build`: sync repository and build on target host."""
     ssh = build_connection(context.profile)
 
     try:
@@ -95,19 +103,7 @@ def execute_image_build_remote(
                 border_style="blue",
             ))
 
-            # Determine deploy path
             deploy_path = context.deploy_path
-            if not deploy_path:
-                if context.use_config:
-                    saved_args = config.load_args("repo.push")
-                    deploy_path = saved_args.get("path") if saved_args else None
-                if not deploy_path:
-                    if context.interactive:
-                        from .utils import prompt_deploy_path
-                        deploy_path = prompt_deploy_path()
-                    else:
-                        console.print("[red]✗ Deploy path required (provide --deploy-path or enable config/interactive mode)[/red]")
-                        return False, None
 
             # Validate local repo
             console.print("\n[bold]Step 1: Validating local repository[/bold]")
@@ -159,7 +155,7 @@ def execute_image_build_remote(
 
 
 def _sync_repo_to_remote(ssh: Any, deploy_path: str, push_command: Any, console: Console) -> bool:
-    """Run deploy push to sync repository to remote."""
+    """Run `deploy repo push` to sync repository to target."""
     from click.testing import CliRunner
 
     runner = CliRunner()
@@ -175,8 +171,8 @@ def _sync_repo_to_remote(ssh: Any, deploy_path: str, push_command: Any, console:
     return True
 
 
-def persist_image_build_remote_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
-    """Save resolved image-build-remote connection args for later runs."""
+def persist_image_build_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
+    """Save resolved image-build connection args for later runs."""
     args_to_save = connection_args_from_connection(connection)
     config.save_args(args_to_save, "image.build")
     return args_to_save

@@ -132,8 +132,8 @@ def execute_service_deploy(
             console.print("\n[bold]Step 2: Verify image on remote host[/bold]")
             if not svc_mgr.image_exists_remote(image):
                 console.print(f"[red]✗ Image '{image}' not found on remote host[/red]")
-                console.print(f"[dim]Use: deploy image push {image}[/dim]")
-                console.print(f"[dim]Or : deploy image build-remote[/dim]")
+                console.print(f"[dim]Use: deploy image push --image {image}[/dim]")
+                console.print("[dim]Or: deploy image build --tag <image:tag>[/dim]")
                 return False, None
             console.print(f"[green]✓ Image '{image}' found on remote host[/green]")
 

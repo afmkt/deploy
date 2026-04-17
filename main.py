@@ -13,9 +13,9 @@ from rich.prompt import Prompt
 from deploy import __version__
 from deploy.config import DeployConfig
 from deploy.image_build_flow import (
-    ImageBuildRemoteArgumentResolver,
-    execute_image_build_remote,
-    persist_image_build_remote_resolution,
+    ImageBuildArgumentResolver,
+    execute_image_build,
+    persist_image_build_resolution,
 )
 from deploy.image_push_flow import (
     ImagePushArgumentResolver,
@@ -60,6 +60,48 @@ def _print_banner(title: str, subtitle: str) -> None:
         f"[bold blue]{title}[/bold blue]\n{subtitle}",
         border_style="blue",
     ))
+
+
+def _profile_from_options(
+    remote: str | None,
+    port: int,
+    username: str | None,
+    key: str | None,
+    password: str | None,
+) -> ConnectionProfile:
+    return ConnectionProfile(
+        host=remote or "",
+        port=port,
+        username=username or "",
+        key=key or "",
+        password=password,
+    )
+
+
+def with_connection_options(*, include_use_config: bool = True):
+    options = [
+        click.option("--remote", help="Remote server hostname or IP."),
+        click.option("--port", default=22, show_default=True, help="SSH port."),
+        click.option("--username", help="SSH username."),
+        click.option("--key", help="Path to SSH private key."),
+        click.option("--password", help="SSH password."),
+    ]
+    if include_use_config:
+        options.append(
+            click.option(
+                "--use-config/--no-use-config",
+                default=True,
+                show_default=True,
+                help="Load arguments from config.",
+            )
+        )
+
+    def decorator(func):
+        for option in reversed(options):
+            func = option(func)
+        return func
+
+    return decorator
 
 
 def _build_connection_from_config(
@@ -108,14 +150,9 @@ def repo() -> None:
 
 
 @repo.command(name="push")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
+@with_connection_options()
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without pushing.")
 @click.pass_context
 def repo_push(
@@ -143,13 +180,7 @@ def repo_push(
         config,
         repo_path=repo_path,
         deploy_path=deploy_path,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        profile=_profile_from_options(remote, port, username, key, password),
     )
     if resolution and resolution.used_saved_args:
         console.print("[dim]Loading arguments from config...[/dim]")
@@ -166,17 +197,12 @@ def repo_push(
 
 
 @repo.command(name="pull")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
+@with_connection_options()
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
 @click.option("--commit/--no-commit", default=False, show_default=True, help="Commit changes in the remote working directory.")
 @click.option("--sync-remote/--no-sync-remote", default=False, show_default=True, help="Commit and push remote changes before pulling.")
 @click.option("--branch", help="Branch name to pull to.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
 @click.option("--dry-run", is_flag=True, help="Validate connection and arguments without pulling.")
 @click.pass_context
 def repo_pull(
@@ -207,13 +233,7 @@ def repo_pull(
         config,
         repo_path=repo_path,
         deploy_path=deploy_path,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        profile=_profile_from_options(remote, port, username, key, password),
         commit=commit,
         sync_remote=sync_remote,
         branch=branch,
@@ -238,12 +258,7 @@ def proxy() -> None:
 
 
 @proxy.command(name="up")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 @click.option("--bootstrap/--no-bootstrap", default=False, show_default=True, help="Bootstrap from native Caddy when present.")
 @click.option("--network", "ingress_networks", multiple=True, help="Ingress network name. Repeat to attach multiple networks.")
 @click.pass_context
@@ -262,13 +277,7 @@ def proxy_up(
     resolver = ProxyUpArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        profile=_profile_from_options(remote, port, username, key, password),
         ingress_networks=ingress_networks,
         migrate_native_caddy=bootstrap,
         interactive=_interactive(ctx),
@@ -288,12 +297,7 @@ def proxy_up(
 
 
 @proxy.command(name="status")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 def proxy_status(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "proxy.status", remote, port, username, key, password, use_config=use_config)
@@ -319,12 +323,7 @@ def proxy_status(remote: str | None, port: int, username: str | None, key: str |
 
 
 @proxy.command(name="down")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 def proxy_down(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "proxy.down", remote, port, username, key, password, use_config=use_config)
@@ -340,12 +339,7 @@ def proxy_down(remote: str | None, port: int, username: str | None, key: str | N
 
 
 @proxy.command(name="logs")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 @click.option("--lines", default=80, show_default=True, help="How many proxy log lines to fetch.")
 def proxy_logs(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool, lines: int) -> None:
     config = DeployConfig()
@@ -437,25 +431,14 @@ def service_init(
 
 @svc.command(name="up")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 def service_up(service_name: str | None, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
         name=service_name,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        profile=_profile_from_options(remote, port, username, key, password),
     )
     if resolution is None:
         console.print("[red]✗ Remote and username are required[/red]")
@@ -470,12 +453,7 @@ def service_up(service_name: str | None, remote: str | None, port: int, username
 
 @svc.command(name="status")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 def service_status(service_name: str | None, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "svc.status", remote, port, username, key, password, use_config=use_config)
@@ -499,12 +477,7 @@ def service_status(service_name: str | None, remote: str | None, port: int, user
 
 @svc.command(name="down")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 def service_down(service_name: str | None, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     ssh = _build_connection_from_config(config, "svc.down", remote, port, username, key, password, use_config=use_config)
@@ -531,12 +504,7 @@ def image() -> None:
 @click.option("--platform", help="Target platform override.")
 @click.option("--registry-username", help="Registry username for private images.")
 @click.option("--registry-password", help="Registry password for private images.")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 @click.option("--dry-run", is_flag=True, help="Validate the transfer without sending the image.")
 @click.pass_context
 def image_push(
@@ -558,13 +526,7 @@ def image_push(
     resolution = resolver.resolve(
         config,
         image=image,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        profile=_profile_from_options(remote, port, username, key, password),
         platform=platform,
         registry_username=registry_username,
         registry_password=registry_password,
@@ -582,12 +544,7 @@ def image_push(
 @image.command(name="build")
 @click.option("--tag", "image_tag", required=True, help="Docker image tag to build.")
 @click.option("--path", "deploy_path", default=None, help="Remote deploy path used for repository sync.")
-@click.option("--remote", help="Remote server hostname or IP.")
-@click.option("--port", default=22, show_default=True, help="SSH port.")
-@click.option("--username", help="SSH username.")
-@click.option("--key", help="Path to SSH private key.")
-@click.option("--password", help="SSH password.")
-@click.option("--use-config/--no-use-config", default=True, show_default=True, help="Load arguments from config.")
+@with_connection_options()
 @click.pass_context
 def image_build(
     ctx: click.Context,
@@ -601,34 +558,28 @@ def image_build(
     use_config: bool,
 ) -> None:
     config = DeployConfig()
-    resolver = ImageBuildRemoteArgumentResolver(use_config=use_config)
+    resolver = ImageBuildArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
         image=image_tag,
         deploy_path=deploy_path,
-        profile=ConnectionProfile(
-            host=remote or "",
-            port=port,
-            username=username or "",
-            key=key or "",
-            password=password,
-        ),
+        default_deploy_path=DEFAULT_DEPLOY_PATH,
+        profile=_profile_from_options(remote, port, username, key, password),
         interactive=_interactive(ctx),
     )
     if resolution is None:
         console.print("[red]✗ Remote and username are required[/red]")
         sys.exit(1)
 
-    success, _connection = execute_image_build_remote(
+    success, _connection = execute_image_build(
         resolution.context,
         console,
-        config=config,
         push_command=repo_push,
     )
     if not success:
         sys.exit(1)
 
-    persist_image_build_remote_resolution(config, resolution.context.profile)
+    persist_image_build_resolution(config, resolution.context.profile)
 
 
 cli.add_command(repo)

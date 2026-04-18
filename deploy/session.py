@@ -175,8 +175,12 @@ def managed_connection(connection) -> Iterator[Any]:
 def connection_args(profile: ConnectionProfile) -> dict[str, Any]:
     """Return config-safe connection args for persistence."""
     resolved = profile.resolved()
+    # Normalize 'local' to 'localhost' for config persistence
+    host = resolved.host
+    if host.strip().lower() == "local":
+        host = "localhost"
     return {
-        "remote": resolved.host,
+        "remote": host,
         "port": resolved.port,
         "username": resolved.username,
         "key": resolved.key,
@@ -185,8 +189,11 @@ def connection_args(profile: ConnectionProfile) -> dict[str, Any]:
 
 def connection_args_from_connection(connection: Any) -> dict[str, Any]:
     """Return config-safe connection args using the active connection state."""
+    host = getattr(connection, "host", "")
+    if str(host).strip().lower() == "local":
+        host = "localhost"
     return {
-        "remote": getattr(connection, "host", ""),
+        "remote": host,
         "port": getattr(connection, "port", DEFAULT_SSH_PORT),
         "username": getattr(connection, "username", ""),
         "key": getattr(connection, "key_filename", ""),

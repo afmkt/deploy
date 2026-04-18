@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-LOCAL_HOST_ALIASES = {"local", "localhost", "127.0.0.1", "::1", "[::1]"}
+LOCAL_HOST_ALIASES = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def is_local_host(host: str | None) -> bool:
@@ -42,7 +42,7 @@ def display_target(connection) -> str:
 def import_source_label(connection) -> str:
     """Return a short label suitable for imported config source naming."""
     if is_local_connection(connection):
-        return "local"
+        return "localhost"
     return getattr(connection, "host", "remote") or "remote"
 
 

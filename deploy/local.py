@@ -27,14 +27,15 @@ class LocalConnection:
 
     def __init__(
         self,
-        host: str = "local",
+        host: str = "localhost",
         port: int = 0,
         username: Optional[str] = None,
         password: Optional[str] = None,
         key_filename: Optional[str] = None,
         command_timeout: Optional[float] = None,
     ):
-        self.host = host or "local"
+        # Always normalize 'local' to 'localhost'
+        self.host = "localhost" if (host or "").strip().lower() == "local" else (host or "localhost")
         self.port = port
         self.username = username or getpass.getuser()
         self.password = password

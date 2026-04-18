@@ -22,7 +22,7 @@ from deploy.image_push_flow import (
     execute_image_push,
     persist_image_push_resolution,
 )
-from deploy.local import LocalConnection
+
 from deploy.paths import REPOS_DIR
 from deploy.proxy import ProxyManager
 from deploy.proxy_up_flow import ProxyUpArgumentResolver, execute_proxy_up
@@ -43,8 +43,7 @@ from deploy.session import (
     managed_connection,
     resolve_connection_profile,
 )
-from deploy.ssh import SSHConnection
-from deploy.target import is_local_connection, proxy_healthcheck_url
+from deploy.target import proxy_healthcheck_url
 
 console = Console()
 DEFAULT_DEPLOY_PATH = REPOS_DIR
@@ -81,7 +80,7 @@ def _profile_from_options(
 
 def with_connection_options(*, include_use_config: bool = True):
     options = [
-        click.option("--remote", help="Remote server hostname or IP."),
+        click.option("--remote", default="localhost", show_default=True, help="Remote server hostname or IP."),
         click.option("--port", default=22, show_default=True, help="SSH port."),
         click.option("--username", help="SSH username."),
         click.option("--key", help="Path to SSH private key."),

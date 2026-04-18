@@ -20,11 +20,8 @@ class RemoteServer:
             deploy_path: Base path for deployments on remote server
         """
         self.ssh = ssh
-        # Expand ~ to $HOME for remote paths
-        if deploy_path.startswith("~"):
-            self.deploy_path = deploy_path.replace("~", "$HOME", 1)
-        else:
-            self.deploy_path = deploy_path
+        # For remote, pass ~ as-is so the shell expands it
+        self.deploy_path = deploy_path
 
     @property
     def is_local(self) -> bool:

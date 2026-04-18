@@ -282,11 +282,8 @@ class ServiceManager:
 
     def __init__(self, ssh: SSHConnection, remote_base: str = REPOS_DIR):
         self.ssh = ssh
-        # Expand ~ to $HOME for remote paths
-        if remote_base.startswith("~"):
-            self.remote_base = remote_base.replace("~", "$HOME", 1)
-        else:
-            self.remote_base = remote_base
+        # For remote, pass ~ as-is so the shell expands it
+        self.remote_base = remote_base
 
     @staticmethod
     def _q(value: str) -> str:

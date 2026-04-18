@@ -10,7 +10,7 @@ from rich.console import Console
 from .ssh import SSHConnection
 from .caddy import CaddyManager
 from .ingress import INGRESS_NETWORK, normalize_ingress_networks
-from .paths import PROXY_DIR
+from .paths import PROXY_DIR, get_local_proxy_dir
 
 console = Console()
 
@@ -117,6 +117,9 @@ class ProxyManager:
 
     def _proxy_base_dir(self) -> str:
         """Return the base directory used for proxy runtime artifacts."""
+        # If running locally, expand ~ for local file operations
+        if self.is_local:
+            return get_local_proxy_dir()
         return PROXY_BASE_DIR
 
     def _proxy_compose_path(self) -> str:

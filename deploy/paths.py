@@ -1,3 +1,7 @@
+def get_local_proxy_dir() -> str:
+    """Return the local proxy directory path with ~ expanded."""
+    import os
+    return os.path.expanduser(PROXY_DIR)
 """Shared filesystem layout constants for deployment artifacts."""
 
 

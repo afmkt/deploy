@@ -282,7 +282,11 @@ class ServiceManager:
 
     def __init__(self, ssh: SSHConnection, remote_base: str = REPOS_DIR):
         self.ssh = ssh
-        self.remote_base = remote_base
+        # Expand ~ to $HOME for remote paths
+        if remote_base.startswith("~"):
+            self.remote_base = remote_base.replace("~", "$HOME", 1)
+        else:
+            self.remote_base = remote_base
 
     @staticmethod
     def _q(value: str) -> str:
@@ -291,8 +295,7 @@ class ServiceManager:
     def _service_dir(self, service_name: str) -> str:
         return get_service_dir_path(service_name, self.remote_base)
 
-    def _service_metadata_path(self, service_name: str) -> str:
-        return f"{self._service_dir(service_name)}/.deploy-service.json"
+
 
     def _compose_command(self, service_name: str, args: str) -> tuple[int, str, str]:
         """Run a docker compose command for a deployed service."""
@@ -362,32 +365,9 @@ class ServiceManager:
         console.print(f"[green]✓ Compose file uploaded to {remote_file}[/green]")
         return True
 
-    def upload_metadata(self, service_name: str, metadata_content: str) -> bool:
-        """Upload persisted service metadata to the target host."""
-        remote_file = self._service_metadata_path(service_name)
-        write_cmd = (
-            f"cat > {self._q(remote_file)} << 'ENDOFMETADATA'\n"
-            f"{metadata_content}\n"
-            "ENDOFMETADATA"
-        )
-        exit_code, _, stderr = self.ssh.execute(write_cmd)
-        if exit_code != 0:
-            console.print(f"[red]✗ Failed to upload service metadata: {stderr.strip()}[/red]")
-            return False
-        console.print(f"[green]✓ Service metadata uploaded to {remote_file}[/green]")
-        return True
 
-    def read_service_metadata(self, service_name: str) -> Optional[dict]:
-        """Return persisted metadata for a deployed service, if available."""
-        metadata_path = self._service_metadata_path(service_name)
-        exit_code, stdout, _ = self.ssh.execute(f"cat {self._q(metadata_path)} 2>/dev/null")
-        if exit_code != 0 or not stdout.strip():
-            return None
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError:
-            console.print(f"[yellow]⚠ Invalid service metadata for '{service_name}'[/yellow]")
-            return None
+
+
 
     @staticmethod
     def _read_optional_metadata_str(metadata: dict, key: str) -> Optional[str]:
@@ -398,14 +378,7 @@ class ServiceManager:
         text = str(value).strip()
         return text or None
 
-    def get_repo_details(self, service_name: str) -> tuple[Optional[str], Optional[str]]:
-        """Return persisted repo revision and repo path for a service, if available."""
-        metadata = self.read_service_metadata(service_name)
-        if not metadata:
-            return None, None
-        revision = self._read_optional_metadata_str(metadata, "repo_revision")
-        path = self._read_optional_metadata_str(metadata, "repo_path")
-        return revision, path
+
 
     def compose_up(self, service_name: str) -> bool:
         """Start the service via docker compose."""

@@ -158,27 +158,7 @@ def execute_service_deploy(
             if not svc_mgr.upload_compose(service_name, compose_content):
                 return False, None
             
-            # Get repo metadata from persisted service state if available
-            repo_revision = None
-            repo_path = None
-            existing_metadata = svc_mgr.get_repo_details(service_name)
-            if existing_metadata:
-                repo_revision, repo_path = existing_metadata
-            
-            metadata_content = render_service_metadata(
-                service_name=service_name,
-                domain=domain,
-                port=port,
-                image=image,
-                ingress_networks=effective_networks,
-                exposure_scope="global" if global_ingress else "single",
-                path_prefix=path_prefix,
-                internal=internal,
-                repo_revision=repo_revision,
-                repo_path=repo_path,
-            )
-            if not svc_mgr.upload_metadata(service_name, metadata_content):
-                return False, None
+
 
             # Step 4: start service
             console.print("\n[bold]Step 4: Start service[/bold]")
@@ -217,42 +197,20 @@ def print_service_status_block(
     console.print(f"[{colour}]Container state: {container_state}[/{colour}]")
 
     route_host = svc_mgr.get_routed_host(service_name)
-    metadata = svc_mgr.read_service_metadata(service_name)
-    metadata_domain: str | None = metadata.get("domain") if metadata else None
-    port: int = int(metadata.get("port", 0)) if metadata else 0
-    internal: bool = bool(metadata.get("internal", False)) if metadata else False
-
+    # Only use docker-compose.yml/config for metadata
+    if not container_state:
+        console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
+        return
+    colour = "green" if container_state == "running" else "yellow"
+    console.print(f"[{colour}]Container state: {container_state}[/{colour}]")
+    route_host = svc_mgr.get_routed_host(service_name)
     if route_host:
         console.print(f"Route host: {route_host}")
     else:
         console.print("[dim]Route host: (none — internal service or container not running)[/dim]")
-
-    if metadata_domain:
-        console.print(f"Metadata domain: {metadata_domain}")
-    else:
-        console.print("[dim]Metadata domain: (none)[/dim]")
-
-    if not internal and route_host:
-        if route_host in ("localhost", "127.0.0.1"):
-            ingress_hint = f"curl http://localhost/<path>"
-        else:
-            ingress_hint = (
-                f"curl http://localhost/<path>   "
-                f"(or curl -H \"Host: {route_host}\" http://localhost/<path>)"
-            )
-        console.print(f"Ingress access: {ingress_hint}")
-
-    if port:
-        console.print(f"In-network access: http://{service_name}:{port}/<path>")
-
-    if route_host and metadata_domain and route_host != metadata_domain:
-        console.print(
-            f"\n[yellow]⚠ Route host ({route_host}) does not match metadata domain "
-            f"({metadata_domain}). Re-run svc init with the correct domain and redeploy.[/yellow]"
-        )
-
+    # [recent container logs]
     logs = svc_mgr.get_logs(service_name, lines=20)
-    if logs.strip():
+    if logs and logs.strip():
         console.print("\n[bold]Recent logs:[/bold]")
         console.print(logs.rstrip())
 

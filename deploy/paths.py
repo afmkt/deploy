@@ -1,5 +1,8 @@
 """Shared filesystem layout constants for deployment artifacts."""
 
+
+import os
+
 DEPLOY_BASE_DIR = "~/.deploy"
 REPOS_DIR = f"{DEPLOY_BASE_DIR}/repos"
 SERVICES_DIR = f"{DEPLOY_BASE_DIR}/services"
@@ -16,7 +19,8 @@ def get_bare_repo_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
     Returns:
         Full path to the bare repository (e.g., ~/.deploy/repos/myapp.git)
     """
-    return f"{base_path}/{repo_name}.git"
+    # Always expand ~ for local file operations
+    return os.path.expanduser(f"{base_path}/{repo_name}.git")
 
 
 def get_work_dir_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
@@ -29,7 +33,7 @@ def get_work_dir_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
     Returns:
         Full path to the working directory (e.g., ~/.deploy/repos/myapp.work)
     """
-    return f"{base_path}/{repo_name}.work"
+    return os.path.expanduser(f"{base_path}/{repo_name}.work")
 
 
 def get_service_dir_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
@@ -42,4 +46,4 @@ def get_service_dir_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
     Returns:
         Full path to the service directory (e.g., ~/.deploy/repos/myapp.service)
     """
-    return f"{base_path}/{repo_name}.service"
+    return os.path.expanduser(f"{base_path}/{repo_name}.service")

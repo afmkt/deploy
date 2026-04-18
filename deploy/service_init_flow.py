@@ -166,15 +166,6 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
     console.print(f"[dim]Detected entrypoint: {context.entrypoint_file} -> {context.app_str}[/dim]")
     artifacts: list[tuple[str, Path, str]] = []
 
-    dockerfile_path = context.project_dir / "Dockerfile"
-    dockerfile_existed = dockerfile_path.exists()
-    if dockerfile_path.exists() and not context.force:
-        console.print("[dim]Dockerfile already exists, skipping (use --force to overwrite)[/dim]")
-        artifacts.append(("Dockerfile", dockerfile_path, "skipped"))
-    else:
-        dockerfile_path.write_text(render_dockerfile(context.app_str, context.port))
-        console.print(f"[green]✓ Wrote {dockerfile_path}[/green]")
-        artifacts.append(("Dockerfile", dockerfile_path, "overwritten" if dockerfile_existed else "created"))
 
     compose_path = context.project_dir / "docker-compose.yml"
     compose_existed = compose_path.exists()
@@ -229,7 +220,6 @@ def execute_service_init(context: ServiceInitExecutionContext, console: Console)
         console.print(f"  - {argument.name}: {argument.value} [dim]<- {argument.origin}[/dim]")
 
     console.print("\n[bold]3. Most likely customization points[/bold]")
-    console.print("  - Dockerfile: runtime base image, dependency install strategy, startup command")
     console.print("  - docker-compose.yml: image/build mode, labels/routing, env vars, mounts, restart policy")
     console.print("  - Flags to rerun with: --path-prefix, --network, --global, --force")
 

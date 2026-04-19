@@ -153,6 +153,7 @@ def repo() -> None:
 @with_connection_options()
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
+@click.option("--non-interactive", is_flag=True, help="Disable interactive prompts.")
 @click.pass_context
 def repo_push(
     ctx: click.Context,
@@ -164,6 +165,7 @@ def repo_push(
     deploy_path: str,
     repo_path: str,
     use_config: bool,
+    non_interactive: bool,
 ) -> None:
     _print_banner("Git SSH Deploy Tool", "Sync local Git repository to a remote repository")
 
@@ -171,7 +173,7 @@ def repo_push(
     resolver = PushArgumentResolver(
         default_repo_path=".",
         default_deploy_path=DEFAULT_DEPLOY_PATH,
-        interactive=_interactive(ctx),
+        interactive=_interactive(ctx) if not non_interactive else False,
         use_config=use_config,
     )
     resolution = resolver.resolve(
@@ -486,6 +488,7 @@ def image() -> None:
 @click.option("--registry-username", help="Registry username for private images.")
 @click.option("--registry-password", help="Registry password for private images.")
 @with_connection_options()
+@click.option("--non-interactive", is_flag=True, help="Disable interactive prompts.")
 @click.pass_context
 def image_push(
     ctx: click.Context,
@@ -499,9 +502,10 @@ def image_push(
     key: str | None,
     password: str | None,
     use_config: bool,
+    non_interactive: bool,
 ) -> None:
     config = DeployConfig()
-    resolver = ImagePushArgumentResolver(interactive=_interactive(ctx), use_config=use_config)
+    resolver = ImagePushArgumentResolver(interactive=_interactive(ctx) if not non_interactive else False, use_config=use_config)
     resolution = resolver.resolve(
         config,
         image=image,

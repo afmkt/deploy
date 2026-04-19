@@ -118,7 +118,9 @@ class DockerManager:
         for cmd in commands:
             exit_code, _, stderr = self.ssh.execute(cmd)
             if exit_code != 0:
-                console.print(f"[red]✗ Installation step failed: {stderr}[/red]")
+                console.print(f"[red]✗ Installation step failed[/red]")
+                console.print(f"  Command: {cmd}")
+                console.print(f"  Error: {stderr}")
                 return False
 
         if self.is_docker_installed():
@@ -375,11 +377,12 @@ class DockerManager:
         is tagged with the original name:tag automatically.
         """
         console.print("[blue]Loading image on remote server...[/blue]")
-        exit_code, stdout, stderr = self.ssh.execute(
-            f"docker load -i {self._q(remote_tar_path)}"
-        )
+        cmd = f"docker load -i {self._q(remote_tar_path)}"
+        exit_code, stdout, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
-            console.print(f"[red]✗ docker load failed: {stderr.strip()}[/red]")
+            console.print(f"[red]✗ docker load failed[/red]")
+            console.print(f"  Command: {cmd}")
+            console.print(f"  Error: {stderr.strip()}")
             return False
 
         loaded = stdout.strip()

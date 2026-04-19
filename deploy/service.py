@@ -294,13 +294,6 @@ class ServiceManager:
 
 
 
-    def _compose_command(self, service_name: str, args: str) -> tuple[int, str, str]:
-        """Run a docker compose command for a deployed service."""
-        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
-        return self.ssh.execute(
-            f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} {args}"
-        )
-
     def image_exists_remote(self, image: str) -> bool:
         """Check whether a Docker image is available on the remote host."""
         exit_code, _, _ = self.ssh.execute(
@@ -327,11 +320,12 @@ class ServiceManager:
     def build_image_from_context(self, image: str, context_path: str) -> bool:
         """Build a Docker image from an existing context directory on the remote host."""
         console.print(f"[blue]Building '{image}' on remote host from {context_path}...[/blue]")
-        exit_code, _, stderr = self.ssh.execute(
-            f"docker build -t {self._q(image)} {self._q(context_path)}"
-        )
+        cmd = f"docker build -t {self._q(image)} {self._q(context_path)}"
+        exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
-            console.print(f"[red]✗ Remote docker build failed: {stderr.strip()}[/red]")
+            console.print(f"[red]✗ Remote docker build failed[/red]")
+            console.print(f"  Command: {cmd}")
+            console.print(f"  Error: {stderr.strip()}")
             return False
         console.print(f"[green]✓ Image '{image}' built on remote host[/green]")
         return True
@@ -380,18 +374,25 @@ class ServiceManager:
     def compose_up(self, service_name: str) -> bool:
         """Start the service via docker compose."""
         console.print(f"[blue]Starting service '{service_name}'...[/blue]")
-        exit_code, _, stderr = self._compose_command(service_name, "up -d --pull never")
+        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
+        cmd = f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} up -d --pull never"
+        exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
-            console.print(f"[red]✗ docker compose up failed: {stderr.strip()}[/red]")
-            return False
+            console.print(f"[red]✗ docker compose up failed[/red]")
+            console.print(f"  Command: {cmd}")
+            console.print(f"  Error: {stderr.strip()}")
         console.print(f"[green]✓ Service '{service_name}' is up[/green]")
         return True
 
     def compose_down(self, service_name: str) -> bool:
         """Stop and remove the remote service containers."""
-        exit_code, _, stderr = self._compose_command(service_name, "down")
+        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
+        cmd = f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} down"
+        exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
-            console.print(f"[red]✗ docker compose down failed: {stderr.strip()}[/red]")
+            console.print(f"[red]✗ docker compose down failed[/red]")
+            console.print(f"  Command: {cmd}")
+            console.print(f"  Error: {stderr.strip()}")
             return False
         console.print(f"[green]✓ Service '{service_name}' stopped[/green]")
         return True

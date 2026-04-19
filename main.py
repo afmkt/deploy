@@ -154,6 +154,7 @@ def repo() -> None:
 @click.option("--path", "deploy_path", default=DEFAULT_DEPLOY_PATH, show_default=True, help="Remote deploy path.")
 @click.option("--repo-path", default=".", show_default=True, help="Path to the local Git repository.")
 @click.option("--non-interactive", is_flag=True, help="Disable interactive prompts.")
+@click.option("--force", is_flag=True, help="Discard uncommitted changes in remote work directory before update.")
 @click.pass_context
 def repo_push(
     ctx: click.Context,
@@ -166,6 +167,7 @@ def repo_push(
     repo_path: str,
     use_config: bool,
     non_interactive: bool,
+    force: bool,
 ) -> None:
     _print_banner("Git SSH Deploy Tool", "Sync local Git repository to a remote repository")
 
@@ -175,6 +177,7 @@ def repo_push(
         default_deploy_path=DEFAULT_DEPLOY_PATH,
         interactive=_interactive(ctx) if not non_interactive else False,
         use_config=use_config,
+        force=force,
     )
     resolution = resolver.resolve(
         config,
@@ -420,14 +423,16 @@ def service_init(
 @svc.command(name="up")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
 @click.option("--sync/--no-sync", default=False, help="Sync the git repository before deploying.")
+@click.option("--force", is_flag=True, help="Discard uncommitted changes in remote work directory before update.")
 @with_connection_options()
-def service_up(service_name: str | None, sync: bool, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
+def service_up(service_name: str | None, sync: bool, force: bool, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
         name=service_name,
         sync=sync,
+        force=force,
         profile=_profile_from_options(remote, port, username, key, password),
     )
     if resolution is None:

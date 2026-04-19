@@ -32,6 +32,7 @@ class ServiceDeployExecutionContext:
 
     service_name: str
     sync: bool
+    force: bool
     profile: ConnectionProfile
 
 
@@ -54,6 +55,7 @@ class ServiceDeployArgumentResolver:
         *,
         name: str | None,
         sync: bool,
+        force: bool = False,
         profile: ConnectionProfile,
     ) -> ServiceDeployResolutionResult | None:
         completed_profile = resolve_connection_profile(
@@ -68,6 +70,7 @@ class ServiceDeployArgumentResolver:
             context=ServiceDeployExecutionContext(
                 service_name=service_name,
                 sync=sync,
+                force=force,
                 profile=completed_profile,
             )
         )
@@ -135,13 +138,14 @@ def execute_service_deploy(
                     repo_path=".",
                     deploy_path=REPOS_DIR,
                     profile=context.profile,
+                    force=context.force,
                 )
                 if not execute_push(push_context, console):
                     console.print("[red]✗ Repository sync failed[/red]")
                     return False, None
 
                 console.print("\n[bold]Step 1: Pull to remote work dir[/bold]")
-                if not remote.clone_or_update_working_dir(bare_repo_path, work_dir_path):
+                if not remote.clone_or_update_working_dir(bare_repo_path, work_dir_path, force=context.force):
                     console.print("[red]✗ Failed to pull working directory from bare repo[/red]")
                     return False, None
 

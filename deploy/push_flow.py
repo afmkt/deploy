@@ -31,6 +31,7 @@ class PushExecutionContext:
     repo_path: str
     deploy_path: str
     profile: ConnectionProfile
+    force: bool = False
 
 
 @dataclass(slots=True)
@@ -51,11 +52,13 @@ class PushArgumentResolver:
         default_deploy_path: str,
         interactive: bool,
         use_config: bool,
+        force: bool = False,
     ):
         self.default_repo_path = default_repo_path
         self.default_deploy_path = default_deploy_path
         self.interactive = interactive
         self.use_config = use_config
+        self.force = force
 
     def resolve(
         self,
@@ -94,6 +97,7 @@ class PushArgumentResolver:
                 repo_path=resolved_repo_path,
                 deploy_path=resolved_deploy_path,
                 profile=completed_profile,
+                force=self.force,
             ),
             used_saved_args=profile_result.used_saved_args,
         )
@@ -138,7 +142,7 @@ def execute_push(context: PushExecutionContext, console: Console) -> bool:
             bare_repo_path = remote.get_bare_repo_path(repo_name)
             working_dir_path = remote.get_working_dir_path(repo_name)
             current_branch = repo.get_current_branch() or "main"
-            if not remote.clone_or_update_working_dir(bare_repo_path, working_dir_path, current_branch):
+            if not remote.clone_or_update_working_dir(bare_repo_path, working_dir_path, current_branch, force=context.force):
                 console.print("[red]✗ Failed to update deployment working directory[/red]")
                 return False
 

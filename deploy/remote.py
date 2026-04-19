@@ -94,13 +94,14 @@ class RemoteServer:
             console.print(f"[red]✗ Failed to initialize bare repository: {stderr}[/red]")
             return False
 
-    def clone_or_update_working_dir(self, bare_repo_path: str, working_dir_path: str, branch: str = "main") -> bool:
+    def clone_or_update_working_dir(self, bare_repo_path: str, working_dir_path: str, branch: str = "main", force: bool = False) -> bool:
         """Clone or update working directory from bare repository.
 
         Args:
             bare_repo_path: Path to the bare repository
             working_dir_path: Path to the working directory
             branch: Branch name to checkout (default: main)
+            force: If True, discard uncommitted changes before updating
 
         Returns:
             True if successful, False otherwise
@@ -122,10 +123,20 @@ class RemoteServer:
                 console.print(f"[red]✗ Failed to check working directory status: {stderr}[/red]")
                 return False
             if stdout.strip():
-                console.print("[red]✗ Remote working directory has uncommitted changes; aborting update[/red]")
-                console.print(f"[red]Uncommitted files:[/red]")
-                console.print(f"[red]{stdout.strip()}[/red]")
-                return False
+                if force:
+                    console.print("[yellow]⚠ Remote working directory has uncommitted changes; discarding due to --force[/yellow]")
+                    exit_code, stdout, stderr = self.ssh.execute(
+                        f"cd {quoted_working_dir} && git checkout -- . && git clean -fd"
+                    )
+                    if exit_code != 0:
+                        console.print(f"[red]✗ Failed to discard changes: {stderr}[/red]")
+                        return False
+                    console.print("[green]✓ Discarded uncommitted changes[/green]")
+                else:
+                    console.print("[red]✗ Remote working directory has uncommitted changes; aborting update[/red]")
+                    console.print(f"[red]Uncommitted files:[/red]")
+                    console.print(f"[red]{stdout.strip()}[/red]")
+                    return False
             
             # Checkout the specified branch
             exit_code, stdout, stderr = self.ssh.execute(

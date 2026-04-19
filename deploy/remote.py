@@ -31,7 +31,9 @@ class RemoteServer:
     @staticmethod
     def _q(value: str) -> str:
         """Shell-quote dynamic values used in remote commands."""
-        return shlex.quote(value)
+        import os
+        expanded = os.path.expanduser(value)
+        return shlex.quote(expanded)
 
     def create_directory(self, path: str) -> bool:
         """Create directory on remote server.
@@ -121,6 +123,8 @@ class RemoteServer:
                 return False
             if stdout.strip():
                 console.print("[red]✗ Remote working directory has uncommitted changes; aborting update[/red]")
+                console.print(f"[red]Uncommitted files:[/red]")
+                console.print(f"[red]{stdout.strip()}[/red]")
                 return False
             
             # Checkout the specified branch

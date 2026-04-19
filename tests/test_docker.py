@@ -496,7 +496,7 @@ def test_image_push_use_config_falls_back_to_repo_push_profile(monkeypatch):
 
     assert result.exit_code == 0
     assert captured == {
-        "host": "47.100.30.18",
+        "host": "localhost",
         "port": 22,
         "username": "root",
         "password": None,

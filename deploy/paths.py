@@ -51,3 +51,20 @@ def get_service_dir_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
         Full path to the service directory (e.g., ~/.deploy/repos/myapp.service)
     """
     return os.path.expanduser(f"{base_path}/{repo_name}.service")
+
+
+def get_deploy_path(repo_name: str, base_path: str = REPOS_DIR) -> str:
+    """Get the full path for a deployed repository (working directory).
+
+    This is the directory where the git working tree is checked out and where
+    docker-compose.yml is located. Unlike get_work_dir_path, this does not
+    add any suffix to the repo name.
+
+    Args:
+        repo_name: Repository name
+        base_path: Base deployment path (default: REPOS_DIR)
+
+    Returns:
+        Full path to the deployed directory (e.g., ~/.deploy/repos/myapp)
+    """
+    return os.path.expanduser(f"{base_path}/{repo_name}")

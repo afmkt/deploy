@@ -419,13 +419,15 @@ def service_init(
 
 @svc.command(name="up")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
+@click.option("--sync/--no-sync", default=False, help="Sync the git repository before deploying.")
 @with_connection_options()
-def service_up(service_name: str | None, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
+def service_up(service_name: str | None, sync: bool, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
         config,
         name=service_name,
+        sync=sync,
         profile=_profile_from_options(remote, port, username, key, password),
     )
     if resolution is None:

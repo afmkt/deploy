@@ -13,7 +13,7 @@ from rich.console import Console
 
 from .ssh import SSHConnection
 from .ingress import INGRESS_NETWORK, normalize_ingress_networks
-from .paths import REPOS_DIR, get_service_dir_path
+from .paths import REPOS_DIR, get_work_dir_path, get_service_dir_path
 
 console = Console()
 
@@ -292,6 +292,27 @@ class ServiceManager:
     def _service_dir(self, service_name: str) -> str:
         return get_service_dir_path(service_name, self.remote_base)
 
+    def _work_dir(self, service_name: str) -> str:
+        return get_work_dir_path(service_name, self.remote_base)
+
+    def read_compose_from_remote(self, service_name: str) -> str | None:
+        """Read docker-compose.yml content from the remote work directory.
+
+        Args:
+            service_name: The service name (also used as repo/working dir name)
+
+        Returns:
+            The compose file content as a string, or None if file doesn't exist
+        """
+        work_dir = self._work_dir(service_name)
+        compose_file = f"{work_dir}/docker-compose.yml"
+        exit_code, stdout, stderr = self.ssh.execute(
+            f"cat {self._q(compose_file)}"
+        )
+        if exit_code != 0:
+            return None
+        return stdout
+
 
 
     def image_exists_remote(self, image: str) -> bool:
@@ -372,22 +393,23 @@ class ServiceManager:
 
 
     def compose_up(self, service_name: str) -> bool:
-        """Start the service via docker compose."""
+        """Start the service via docker compose from the work directory."""
         console.print(f"[blue]Starting service '{service_name}'...[/blue]")
-        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
-        cmd = f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} up -d --pull never"
+        work_dir = self._work_dir(service_name)
+        cmd = f"cd {self._q(work_dir)} && docker compose -p {self._q(service_name)} up -d --pull never"
         exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
             console.print(f"[red]✗ docker compose up failed[/red]")
             console.print(f"  Command: {cmd}")
             console.print(f"  Error: {stderr.strip()}")
+            return False
         console.print(f"[green]✓ Service '{service_name}' is up[/green]")
         return True
 
     def compose_down(self, service_name: str) -> bool:
-        """Stop and remove the remote service containers."""
-        compose_file = f"{self._service_dir(service_name)}/docker-compose.yml"
-        cmd = f"docker compose -f {self._q(compose_file)} -p {self._q(service_name)} down"
+        """Stop and remove the remote service containers from work directory."""
+        work_dir = self._work_dir(service_name)
+        cmd = f"cd {self._q(work_dir)} && docker compose -p {self._q(service_name)} down"
         exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
             console.print(f"[red]✗ docker compose down failed[/red]")
@@ -398,15 +420,18 @@ class ServiceManager:
         return True
 
     def remove(self, service_name: str) -> bool:
-        """Stop the service and remove its deployed files from the target host."""
+        """Stop the service and remove working directory files from the remote host.
+
+        Removes the working directory content but keeps the bare repository.
+        """
         console.print(f"[blue]Removing service '{service_name}'...[/blue]")
         if not self.compose_down(service_name):
             return False
 
-        remote_dir = self._service_dir(service_name)
+        remote_dir = self._work_dir(service_name)
         exit_code, _, stderr = self.ssh.execute(f"rm -rf {self._q(remote_dir)}")
         if exit_code != 0:
-            console.print(f"[red]✗ Failed to remove service directory: {stderr.strip()}[/red]")
+            console.print(f"[red]✗ Failed to remove working directory: {stderr.strip()}[/red]")
             return False
 
         console.print(f"[green]✓ Service '{service_name}' removed[/green]")

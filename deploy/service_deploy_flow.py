@@ -12,8 +12,10 @@ from rich.panel import Panel
 
 from .config import DeployConfig
 from .ingress import normalize_ingress_networks
-from .proxy import ProxyManager
-from .service import ServiceManager, render_service_compose, render_service_metadata
+from .paths import REPOS_DIR
+from .push_flow import PushExecutionContext, execute_push
+from .remote import RemoteServer
+from .service import ServiceManager
 from .session import (
     ConnectionProfile,
     build_connection,
@@ -29,6 +31,7 @@ class ServiceDeployExecutionContext:
     """Fully resolved arguments required to execute deploy service deploy."""
 
     service_name: str
+    sync: bool
     profile: ConnectionProfile
 
 
@@ -50,6 +53,7 @@ class ServiceDeployArgumentResolver:
         config: DeployConfig,
         *,
         name: str | None,
+        sync: bool,
         profile: ConnectionProfile,
     ) -> ServiceDeployResolutionResult | None:
         completed_profile = resolve_connection_profile(
@@ -63,6 +67,7 @@ class ServiceDeployArgumentResolver:
         return ServiceDeployResolutionResult(
             context=ServiceDeployExecutionContext(
                 service_name=service_name,
+                sync=sync,
                 profile=completed_profile,
             )
         )
@@ -78,7 +83,6 @@ def execute_service_deploy(
     try:
         with managed_connection(ssh):
             svc_mgr = ServiceManager(ssh)
-            proxy_mgr = ProxyManager(ssh)
             service_name = context.service_name
 
             local_definition = _load_local_service_definition(service_name)
@@ -121,15 +125,35 @@ def execute_service_deploy(
             if current_routed_host:
                 console.print(f"[dim]Current routed host: {current_routed_host}[/dim]")
 
-            # Step 1: check ingress proxy is running
-            console.print("\n[bold]Step 1: Check ingress proxy[/bold]")
-            if not proxy_mgr.is_running():
-                console.print("[yellow]⚠ Ingress proxy is not running[/yellow]")
-                console.print("[dim]Run: deploy proxy up[/dim]")
+            remote = RemoteServer(ssh, REPOS_DIR)
+            bare_repo_path = remote.get_bare_repo_path(service_name)
+            work_dir_path = remote.get_working_dir_path(service_name)
+
+            if context.sync:
+                console.print("\n[bold]Step 0: Sync repository[/bold]")
+                push_context = PushExecutionContext(
+                    repo_path=".",
+                    deploy_path=REPOS_DIR,
+                    profile=context.profile,
+                )
+                if not execute_push(push_context, console):
+                    console.print("[red]✗ Repository sync failed[/red]")
+                    return False, None
+
+                console.print("\n[bold]Step 1: Pull to remote work dir[/bold]")
+                if not remote.clone_or_update_working_dir(bare_repo_path, work_dir_path):
+                    console.print("[red]✗ Failed to pull working directory from bare repo[/red]")
+                    return False, None
+
+            if not remote.directory_exists(work_dir_path):
+                console.print(
+                    f"[red]✗ Remote work directory does not exist: {work_dir_path}[/red]"
+                )
+                console.print("[dim]Run: deploy svc up --sync to sync and deploy[/dim]")
                 return False, None
 
-            # Step 2: verify image exists on remote
-            console.print("\n[bold]Step 2: Verify image on remote host[/bold]")
+            step_base = 2 if context.sync else 1
+            console.print(f"\n[bold]Step {step_base}: Verify image on remote host[/bold]")
             if not svc_mgr.image_exists_remote(image):
                 console.print(f"[red]✗ Image '{image}' not found on remote host[/red]")
                 console.print(f"[dim]Use: deploy image push --image {image}[/dim]")
@@ -137,31 +161,19 @@ def execute_service_deploy(
                 return False, None
             console.print(f"[green]✓ Image '{image}' found on remote host[/green]")
 
-            effective_networks = (
-                proxy_mgr.get_configured_ingress_networks() if global_ingress else ingress_networks
-            )
-
-            # Step 3: ensure service directory and compose file
-            console.print("\n[bold]Step 3: Upload service compose[/bold]")
-            if not svc_mgr.ensure_service_dir(service_name):
+            console.print(f"\n[bold]Step {step_base + 1}: Read compose file from remote[/bold]")
+            compose_content = svc_mgr.read_compose_from_remote(service_name)
+            if not compose_content:
+                console.print(
+                    "[red]✗ docker-compose.yml not found in remote work directory[/red]"
+                )
+                console.print(
+                    f"[dim]Expected at: {remote._q(remote.get_working_dir_path(service_name) + '/docker-compose.yml')}[/dim]"
+                )
                 return False, None
-            compose_content = render_service_compose(
-                service_name=service_name,
-                domain=domain,
-                port=port,
-                image=image,
-                ingress_networks=effective_networks,
-                exposure_scope="global" if global_ingress else "single",
-                path_prefix=path_prefix,
-                internal=internal,
-            )
-            if not svc_mgr.upload_compose(service_name, compose_content):
-                return False, None
-            
+            console.print(f"[green]✓ Compose file read from remote work dir[/green]")
 
-
-            # Step 4: start service
-            console.print("\n[bold]Step 4: Start service[/bold]")
+            console.print(f"\n[bold]Step {step_base + 2}: Start service[/bold]")
             if not svc_mgr.compose_up(service_name):
                 return False, None
 

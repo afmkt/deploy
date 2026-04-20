@@ -177,9 +177,18 @@ def execute_service_deploy(
                 return False, None
             console.print(f"[green]✓ Compose file read from remote work dir[/green]")
 
-            console.print(f"\n[bold]Step {step_base + 2}: Start service[/bold]")
-            if not svc_mgr.compose_up(service_name):
-                return False, None
+            console.print(f"\n[bold]Step {step_base + 2}: Start/restart service[/bold]")
+            if context.sync:
+                status = svc_mgr.get_status(service_name)
+                if status == "running":
+                    if not svc_mgr.restart(service_name):
+                        return False, None
+                else:
+                    if not svc_mgr.compose_up(service_name):
+                        return False, None
+            else:
+                if not svc_mgr.compose_up(service_name):
+                    return False, None
 
             console.print(f"\n[bold green]✓ Service '{service_name}' deployed[/bold green]")
             print_service_status_block(service_name, svc_mgr, console)

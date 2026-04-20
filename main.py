@@ -494,6 +494,11 @@ def diagnostic_run(remote: str | None, port: int, username: str | None, key: str
                         console.print(f"      Caddy target: {info.caddy_target}")
                     if info.container_ip:
                         console.print(f"      Container IP: {info.container_ip}")
+                    if info.caddy_host:
+                        access_url = info.caddy_host
+                        if info.path_prefix:
+                            access_url = access_url + info.path_prefix.rstrip("*")
+                        console.print(f"      Access URL: {access_url}")
                     if not info.reachable_from_proxy:
                         console.print(f"      [red]Not reachable from proxy[/red]")
             

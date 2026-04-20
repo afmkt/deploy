@@ -17,6 +17,8 @@ class ServiceDiagnostic:
     container_status: str
     has_caddy_labels: bool
     caddy_target: Optional[str]
+    caddy_host: Optional[str]
+    path_prefix: Optional[str]
     container_ip: Optional[str]
     reachable_from_proxy: bool
     error_message: Optional[str] = None
@@ -90,6 +92,8 @@ class Diagnostics:
                 container_status=container_status,
                 has_caddy_labels=False,
                 caddy_target=None,
+                caddy_host=None,
+                path_prefix=None,
                 container_ip=None,
                 reachable_from_proxy=False,
                 error_message="Container not running",
@@ -101,12 +105,26 @@ class Diagnostics:
         has_caddy_labels = exit_code == 0 and bool(caddy_label.strip())
         
         caddy_target = None
+        caddy_host = None
+        path_prefix = None
         if has_caddy_labels:
             exit_code, reverse_proxy, _ = self.ssh.execute(
                 f"docker inspect --format '{{{{.Config.Labels.caddy.reverse_proxy}}}}' {self._q(service_name)} 2>/dev/null"
             )
             if exit_code == 0:
                 caddy_target = reverse_proxy.strip()
+            
+            exit_code, site_label, _ = self.ssh.execute(
+                f"docker inspect --format '{{{{.Config.Labels.caddy}}}}' {self._q(service_name)} 2>/dev/null"
+            )
+            if exit_code == 0 and site_label.strip():
+                caddy_host = site_label.strip()
+            
+            exit_code, handle_path, _ = self.ssh.execute(
+                f"docker inspect --format '{{{{.Config.Labels.caddy.handle_path}}}}' {self._q(service_name)} 2>/dev/null"
+            )
+            if exit_code == 0 and handle_path.strip():
+                path_prefix = handle_path.strip()
         
         exit_code, ip, _ = self.ssh.execute(
             f"docker inspect --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' {self._q(service_name)} 2>/dev/null"
@@ -126,6 +144,8 @@ class Diagnostics:
             container_status=container_status,
             has_caddy_labels=has_caddy_labels,
             caddy_target=caddy_target,
+            caddy_host=caddy_host,
+            path_prefix=path_prefix,
             container_ip=container_ip,
             reachable_from_proxy=reachable,
             error_message=error_msg,

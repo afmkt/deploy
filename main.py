@@ -44,6 +44,7 @@ from deploy.session import (
     resolve_connection_profile,
 )
 from deploy.target import proxy_healthcheck_url
+from deploy.diagnostic import Diagnostics
 
 console = Console()
 DEFAULT_DEPLOY_PATH = REPOS_DIR
@@ -354,6 +355,28 @@ def proxy_logs(remote: str | None, port: int, username: str | None, key: str | N
         sys.exit(1)
 
 
+@proxy.command(name="restart")
+@with_connection_options()
+def proxy_restart(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
+    config = DeployConfig()
+    ssh = _build_connection_from_config(config, "proxy.restart", remote, port, username, key, password, use_config=use_config)
+    if ssh is None:
+        console.print("[red]✗ Remote and username are required[/red]")
+        sys.exit(1)
+
+    try:
+        with managed_connection(ssh):
+            mgr = ProxyManager(ssh)
+            console.print("[blue]Restarting proxy container...[/blue]")
+            exit_code, _, stderr = ssh.execute("docker restart caddy-proxy")
+            if exit_code != 0:
+                console.print(f"[red]✗ Failed to restart proxy: {stderr.strip()}[/red]")
+                sys.exit(1)
+            console.print("[green]✓ Proxy restarted[/green]")
+    except ConnectionError:
+        sys.exit(1)
+
+
 @click.group(name="svc")
 def svc() -> None:
     """Scaffold and deploy Docker-based services."""
@@ -420,6 +443,68 @@ def service_init(
     )
 
 
+@click.group()
+def diagnostic() -> None:
+    """Diagnose deployment connectivity issues."""
+
+
+@diagnostic.command(name="run")
+@with_connection_options()
+@click.option("--fix", is_flag=True, help="Attempt to fix connectivity issues by restarting proxy.")
+def diagnostic_run(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool, fix: bool) -> None:
+    config = DeployConfig()
+    ssh = _build_connection_from_config(config, "diagnostic.run", remote, port, username, key, password, use_config=use_config)
+    if ssh is None:
+        console.print("[red]✗ Remote and username are required[/red]")
+        sys.exit(1)
+
+    try:
+        with managed_connection(ssh):
+            diag = Diagnostics(ssh)
+            
+            console.print("[bold]Proxy Status:[/bold]")
+            proxy_info = diag.check_proxy()
+            if proxy_info.is_running:
+                console.print(f"  [green]✓ Proxy is running ({proxy_info.status})[/green]")
+            else:
+                console.print(f"  [red]✗ Proxy is not running[/red]")
+            
+            if proxy_info.has_config:
+                console.print("  [green]✓ Proxy has configuration[/green]")
+                if proxy_info.config_preview:
+                    console.print(f"  [dim]Config preview:[/dim]")
+                    for line in proxy_info.config_preview.split('\n')[:5]:
+                        console.print(f"    {line}")
+            else:
+                console.print("  [yellow]⚠ No configuration detected[/yellow]")
+            
+            console.print("\n[bold]Services with Caddy labels:[/bold]")
+            services = diag.list_services_with_caddy_labels()
+            if not services:
+                console.print("  [yellow]⚠ No services with caddy labels found[/yellow]")
+            else:
+                for svc in services:
+                    info = diag.check_service_connectivity(svc)
+                    status_icon = "✓" if info.reachable_from_proxy else "✗"
+                    status_color = "green" if info.reachable_from_proxy else "red"
+                    console.print(f"  [{status_color}]{status_icon}[/{status_color}] {svc}")
+                    console.print(f"      Container: {info.container_status}")
+                    console.print(f"      Has Caddy labels: {info.has_caddy_labels}")
+                    if info.caddy_target:
+                        console.print(f"      Caddy target: {info.caddy_target}")
+                    if info.container_ip:
+                        console.print(f"      Container IP: {info.container_ip}")
+                    if not info.reachable_from_proxy:
+                        console.print(f"      [red]Not reachable from proxy[/red]")
+            
+            if fix:
+                console.print("\n[bold]Attempting to fix connectivity...[/bold]")
+                diag.fix_service_connectivity(services[0] if services else "unknown")
+                
+    except ConnectionError:
+        sys.exit(1)
+
+
 @svc.command(name="up")
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
 @click.option("--sync/--no-sync", default=False, help="Sync the git repository before deploying.")
@@ -479,6 +564,25 @@ def service_down(service_name: str | None, remote: str | None, port: int, userna
     try:
         with managed_connection(ssh):
             if not ServiceManager(ssh).compose_down(effective_service_name):
+                sys.exit(1)
+    except ConnectionError:
+        sys.exit(1)
+
+
+@svc.command(name="restart")
+@click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
+@with_connection_options()
+def service_restart(service_name: str | None, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
+    config = DeployConfig()
+    ssh = _build_connection_from_config(config, "svc.restart", remote, port, username, key, password, use_config=use_config)
+    if ssh is None:
+        console.print("[red]✗ Remote and username are required[/red]")
+        sys.exit(1)
+
+    effective_service_name = service_name or Path(".").resolve().name
+    try:
+        with managed_connection(ssh):
+            if not ServiceManager(ssh).restart(effective_service_name):
                 sys.exit(1)
     except ConnectionError:
         sys.exit(1)
@@ -576,6 +680,7 @@ cli.add_command(repo)
 cli.add_command(proxy)
 cli.add_command(svc)
 cli.add_command(image)
+cli.add_command(diagnostic)
 
 # Aliases kept for programmatic imports and tests.
 main = repo_push

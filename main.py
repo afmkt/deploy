@@ -514,8 +514,9 @@ def diagnostic_run(remote: str | None, port: int, username: str | None, key: str
 @click.option("--name", "service_name", help="Service name. Defaults to current directory name.")
 @click.option("--sync/--no-sync", default=False, help="Sync the git repository before deploying.")
 @click.option("--force", is_flag=True, help="Discard uncommitted changes in remote work directory before update.")
+@click.option("--refresh", is_flag=True, help="Recreate the container to apply configuration changes.")
 @with_connection_options()
-def service_up(service_name: str | None, sync: bool, force: bool, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
+def service_up(service_name: str | None, sync: bool, force: bool, refresh: bool, remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool) -> None:
     config = DeployConfig()
     resolver = ServiceDeployArgumentResolver(use_config=use_config)
     resolution = resolver.resolve(
@@ -523,6 +524,7 @@ def service_up(service_name: str | None, sync: bool, force: bool, remote: str | 
         name=service_name,
         sync=sync,
         force=force,
+        refresh=refresh,
         profile=_profile_from_options(remote, port, username, key, password),
     )
     if resolution is None:

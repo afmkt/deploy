@@ -392,11 +392,12 @@ class ServiceManager:
 
 
 
-    def compose_up(self, service_name: str) -> bool:
+    def compose_up(self, service_name: str, force_recreate: bool = False) -> bool:
         """Start the service via docker compose from the work directory."""
         console.print(f"[blue]Starting service '{service_name}'...[/blue]")
         work_dir = self._work_dir(service_name)
-        cmd = f"cd {self._q(work_dir)} && docker compose -p {self._q(service_name)} up -d --pull never"
+        recreate_flag = "--force-recreate" if force_recreate else ""
+        cmd = f"cd {self._q(work_dir)} && docker compose -p {self._q(service_name)} up -d --pull never {recreate_flag}"
         exit_code, _, stderr = self.ssh.execute(cmd)
         if exit_code != 0:
             console.print(f"[red]✗ docker compose up failed[/red]")

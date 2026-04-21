@@ -33,6 +33,7 @@ class ServiceDeployExecutionContext:
     service_name: str
     sync: bool
     force: bool
+    refresh: bool
     profile: ConnectionProfile
 
 
@@ -56,6 +57,7 @@ class ServiceDeployArgumentResolver:
         name: str | None,
         sync: bool,
         force: bool = False,
+        refresh: bool = False,
         profile: ConnectionProfile,
     ) -> ServiceDeployResolutionResult | None:
         completed_profile = resolve_connection_profile(
@@ -71,6 +73,7 @@ class ServiceDeployArgumentResolver:
                 service_name=service_name,
                 sync=sync,
                 force=force,
+                refresh=refresh,
                 profile=completed_profile,
             )
         )
@@ -181,8 +184,12 @@ def execute_service_deploy(
             if context.sync:
                 status = svc_mgr.get_status(service_name)
                 if status == "running":
-                    if not svc_mgr.restart(service_name):
-                        return False, None
+                    if context.refresh:
+                        if not svc_mgr.compose_up(service_name, force_recreate=True):
+                            return False, None
+                    else:
+                        if not svc_mgr.restart(service_name):
+                            return False, None
                 else:
                     if not svc_mgr.compose_up(service_name):
                         return False, None

@@ -122,7 +122,7 @@ def execute_service_deploy(
                 f"Image: {image}  Domain: {domain}  Port: {port}\n"
                 f"Remote: {display_target(ssh)}\n"
                 + (f"Path prefix: {path_prefix}\n" if path_prefix else "")
-                + (f"Mode: internal (no ingress)\n" if internal else f"Ingress: {'all configured networks' if global_ingress else ', '.join(ingress_networks)}"),
+                + ("Mode: internal (no ingress)\n" if internal else f"Ingress: {'all configured networks' if global_ingress else ', '.join(ingress_networks)}"),
                 border_style="blue",
             ))
 

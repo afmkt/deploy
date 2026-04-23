@@ -549,3 +549,17 @@ class ServiceManager:
         if exit_code == 0 and stdout.strip():
             return stdout.strip()
         return None
+
+    def get_path_prefix(self, service_name: str) -> Optional[str]:
+        """Return the path prefix configured via caddy.handle_path label."""
+        exit_code, stdout, _ = self.ssh.execute(
+            "docker inspect --format '{{{{ index .Config.Labels \"caddy.handle_path\" }}}}}' "
+            + self._q(service_name) + " 2>/dev/null"
+        )
+        if exit_code == 0 and stdout.strip():
+            raw = stdout.strip()
+            normalized = raw.rstrip("*").rstrip("/")
+            if not normalized:
+                return "/"
+            return normalized
+        return None

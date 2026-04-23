@@ -236,13 +236,26 @@ def print_service_status_block(
     if not container_state:
         console.print(f"[yellow]Service '{service_name}' not found on target[/yellow]")
         return
-    colour = "green" if container_state == "running" else "yellow"
-    console.print(f"[{colour}]Container state: {container_state}[/{colour}]")
-    route_host = svc_mgr.get_routed_host(service_name)
     if route_host:
         console.print(f"Route host: {route_host}")
     else:
         console.print("[dim]Route host: (none — internal service or container not running)[/dim]")
+    # [service path prefix]
+    from .diagnostic import ServiceDiagnostic
+    diagnostic = ServiceDiagnostic(
+        name=service_name,
+        container_status=container_state,
+        has_caddy_labels=bool(route_host),
+        caddy_target=svc_mgr.get_routed_site_label(service_name),
+        caddy_host=route_host,
+        path_prefix=svc_mgr.get_path_prefix(service_name),
+        container_ip=svc_mgr.get_container_ip(service_name),
+        reachable_from_proxy=False,
+    )
+    if diagnostic.path_prefix:
+        console.print(f"Path prefix: {diagnostic.path_prefix}")
+    else:
+        console.print("[dim]Path prefix: (none)[/dim]")
     # [recent container logs]
     logs = svc_mgr.get_logs(service_name, lines=20)
     if logs and logs.strip():

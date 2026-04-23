@@ -9,6 +9,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
+from rich import print as rprint
 
 from deploy import __version__
 from deploy.config import DeployConfig
@@ -462,12 +463,12 @@ def diagnose(remote: str | None, port: int, username: str | None, key: str | Non
             if proxy_info.is_running:
                 console.print(f"  [green]✓ Proxy is running ({proxy_info.status})[/green]")
             else:
-                console.print(f"  [red]✗ Proxy is not running[/red]")
+                console.print("  [red]✗ Proxy is not running[/red]")
             
             if proxy_info.has_config:
                 console.print("  [green]✓ Proxy has configuration[/green]")
                 if proxy_info.config_preview:
-                    console.print(f"  [dim]Config preview:[/dim]")
+                    console.print("  [dim]Config preview:[/dim]")
                     for line in proxy_info.config_preview.split('\n')[:5]:
                         console.print(f"    {line}")
             else:
@@ -479,7 +480,9 @@ def diagnose(remote: str | None, port: int, username: str | None, key: str | Non
                 console.print("  [yellow]⚠ No services with caddy labels found[/yellow]")
             else:
                 for svc in services:
+                    
                     info = diag.check_service_connectivity(svc)
+                    # rprint(info)
                     status_icon = "✓" if info.reachable_from_proxy else "✗"
                     status_color = "green" if info.reachable_from_proxy else "red"
                     console.print(f"  [{status_color}]{status_icon}[/{status_color}] {svc}")
@@ -492,10 +495,10 @@ def diagnose(remote: str | None, port: int, username: str | None, key: str | Non
                     if info.caddy_host:
                         access_url = info.caddy_host
                         if info.path_prefix:
-                            access_url = access_url + info.path_prefix.rstrip("*")
+                            access_url = access_url + info.path_prefix
                         console.print(f"      Access URL: {access_url}")
                     if not info.reachable_from_proxy:
-                        console.print(f"      [red]Not reachable from proxy[/red]")
+                        console.print("      [red]Not reachable from proxy[/red]")
             
             if fix:
                 console.print("\n[bold]Attempting to fix connectivity...[/bold]")

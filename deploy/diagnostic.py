@@ -7,6 +7,7 @@ from rich.console import Console
 
 from .ssh import SSHConnection
 from .proxy import PROXY_CONTAINER
+from rich import print
 
 console = Console()
 
@@ -85,6 +86,7 @@ class Diagnostics:
             f"docker inspect --format '{{{{.State.Status}}}}' {self._q(service_name)} 2>/dev/null"
         )
         container_status = status.strip() if exit_code == 0 else "not found"
+
         
         if container_status != "running":
             return ServiceDiagnostic(
@@ -120,9 +122,8 @@ class Diagnostics:
             if exit_code == 0 and site_label.strip():
                 caddy_host = site_label.strip()
             
-            exit_code, handle_path, _ = self.ssh.execute(
-                f"docker inspect --format '{{{{.Config.Labels.caddy.handle_path}}}}' {self._q(service_name)} 2>/dev/null"
-            )
+            cmd = f"docker inspect --format '{{{{index .Config.Labels \"caddy.handle_path\"}}}}' {self._q(service_name)} 2>/dev/null"
+            exit_code, handle_path, _ = self.ssh.execute(cmd)
             if exit_code == 0 and handle_path.strip():
                 path_prefix = handle_path.strip()
         

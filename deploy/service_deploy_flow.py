@@ -178,7 +178,7 @@ def execute_service_deploy(
                     f"[dim]Expected at: {remote._q(remote.get_working_dir_path(service_name) + '/docker-compose.yml')}[/dim]"
                 )
                 return False, None
-            console.print(f"[green]✓ Compose file read from remote work dir[/green]")
+            console.print("[green]✓ Compose file read from remote work dir[/green]")
 
             console.print(f"\n[bold]Step {step_base + 2}: Start/restart service[/bold]")
             if context.sync:

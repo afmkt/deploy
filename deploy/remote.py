@@ -125,16 +125,16 @@ class RemoteServer:
             if stdout.strip():
                 if force:
                     console.print("[yellow]⚠ Remote working directory has uncommitted changes; discarding due to --force[/yellow]")
-                    exit_code, stdout, stderr = self.ssh.execute(
-                        f"cd {quoted_working_dir} && git checkout -- . && git clean -fd"
-                    )
+                    cmd = f"cd {quoted_working_dir} && git checkout -- . && git clean -fd"
+                    print("Running command to discard changes:", cmd)
+                    exit_code, stdout, stderr = self.ssh.execute(cmd)
                     if exit_code != 0:
                         console.print(f"[red]✗ Failed to discard changes: {stderr}[/red]")
                         return False
                     console.print("[green]✓ Discarded uncommitted changes[/green]")
                 else:
                     console.print("[red]✗ Remote working directory has uncommitted changes; aborting update[/red]")
-                    console.print(f"[red]Uncommitted files:[/red]")
+                    console.print("[red]Uncommitted files:[/red]")
                     console.print(f"[red]{stdout.strip()}[/red]")
                     return False
             

@@ -443,17 +443,12 @@ def service_init(
     )
 
 
-@click.group()
-def diagnostic() -> None:
-    """Diagnose deployment connectivity issues."""
-
-
-@diagnostic.command(name="run")
+@click.command()
 @with_connection_options()
 @click.option("--fix", is_flag=True, help="Attempt to fix connectivity issues by restarting proxy.")
-def diagnostic_run(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool, fix: bool) -> None:
+def diagnose(remote: str | None, port: int, username: str | None, key: str | None, password: str | None, use_config: bool, fix: bool) -> None:
     config = DeployConfig()
-    ssh = _build_connection_from_config(config, "diagnostic.run", remote, port, username, key, password, use_config=use_config)
+    ssh = _build_connection_from_config(config, "diagnose", remote, port, username, key, password, use_config=use_config)
     if ssh is None:
         console.print("[red]✗ Remote and username are required[/red]")
         sys.exit(1)
@@ -687,7 +682,7 @@ cli.add_command(repo)
 cli.add_command(proxy)
 cli.add_command(svc)
 cli.add_command(image)
-cli.add_command(diagnostic)
+cli.add_command(diagnose)
 
 # Aliases kept for programmatic imports and tests.
 main = repo_push

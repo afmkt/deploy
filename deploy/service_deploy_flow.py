@@ -185,6 +185,9 @@ def execute_service_deploy(
                 status = svc_mgr.get_status(service_name)
                 if status == "running":
                     if context.refresh:
+                        console.print("[blue]Stopping existing service containers...[/blue]")
+                        if not svc_mgr.compose_down(service_name):
+                            return False, None
                         if not svc_mgr.compose_up(service_name, force_recreate=True):
                             return False, None
                     else:

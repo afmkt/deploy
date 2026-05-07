@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Iterator, Mapping
 from rich.prompt import Prompt
 
-from .config import DeployConfig
 from .local import LocalConnection
 from .ssh import SSHConnection
 from .target import is_local_host, resolve_target
@@ -43,7 +42,7 @@ class ConnectionProfile:
 
 @dataclass(slots=True)
 class ProfileLoadResult:
-    """Outcome of loading connection settings from config and CLI input."""
+    """Outcome of loading connection settings for a command run."""
 
     profile: ConnectionProfile
     saved_args: dict[str, Any]
@@ -51,48 +50,14 @@ class ProfileLoadResult:
     used_saved_args: bool = False
 
 
-def load_connection_profile(
-    config: DeployConfig,
-    section: str,
-    profile: ConnectionProfile,
-    *,
-    use_config: bool,
-    fallback_sources: Iterable[str] = (),
-) -> ProfileLoadResult:
-    """Load and normalize connection settings for a command.
-
-    The command's own saved section is preferred. When requested, fallback
-    sources can provide a complete remote SSH profile if the command-specific
-    config is incomplete.
-    """
-    saved_args = config.load_args(section) if use_config else {}
-    fallback_source = None
-
-    if use_config and fallback_sources and _needs_complete_remote_profile(saved_args):
-        for source in fallback_sources:
-            candidate = config.load_args(source)
-            if is_local_host(_saved_host(candidate)):
-                continue
-            if _has_complete_remote_profile(candidate):
-                saved_args = candidate
-                fallback_source = source
-                break
-
-    saved_host = _saved_host(saved_args)
-
-    loaded = ConnectionProfile(
-        host=profile.host or saved_host,
-        port=profile.port if profile.port != DEFAULT_SSH_PORT else int(saved_args.get("port", DEFAULT_SSH_PORT)),
-        username=profile.username or str(saved_args.get("username", "")),
-        key=profile.key or str(saved_args.get("key", "")),
-        password=profile.password,
-    ).resolved()
-
+def load_connection_profile(profile: ConnectionProfile) -> ProfileLoadResult:
+    """Return a ProfileLoadResult with the given profile (no config persistence)."""
+    resolved = profile.resolved()
     return ProfileLoadResult(
-        profile=loaded,
-        saved_args=saved_args,
-        fallback_source=fallback_source,
-        used_saved_args=bool(saved_args),
+        profile=resolved,
+        saved_args={},
+        fallback_source=None,
+        used_saved_args=False,
     )
 
 
@@ -211,67 +176,10 @@ def load_defaulted_value(current: Any, default: Any, saved_args: Mapping[str, An
 # Canonical shared resolvers
 # ---------------------------------------------------------------------------
 
-ALL_FALLBACK_SOURCES: tuple[str, ...] = (
-    "repo.push", "repo.pull", "image.push", "image.build",
-    "proxy.up", "svc.up",
-)
-
-
 def resolve_connection_profile(
-    config: "DeployConfig",
-    section: str,
     profile: ConnectionProfile,
-    *,
-    use_config: bool,
     interactive: bool = False,
 ) -> ConnectionProfile | None:
-    """Canonical connection resolution shared by all commands.
-
-    Always applies the full cross-command fallback list so saved settings from
-    any command are available to every other command.
-    """
-    result = load_connection_profile(
-        config,
-        section,
-        profile,
-        use_config=use_config,
-        fallback_sources=ALL_FALLBACK_SOURCES,
-    )
+    """Resolve connection settings from CLI input and optional prompts."""
+    result = load_connection_profile(profile)
     return complete_connection_profile(result.profile, interactive)
-
-
-def resolve_path_arg(
-    cli_value: str,
-    default: str,
-    saved_args: Mapping[str, Any],
-    key: str,
-) -> str:
-    """Resolve a path argument using CLI value, saved config, or default.
-
-    Returns the CLI value when it differs from the default; otherwise falls
-    back to the saved config value if present.
-    """
-    return load_defaulted_value(cli_value, default, saved_args, key)
-
-
-def _has_complete_remote_profile(saved_args: Mapping[str, Any]) -> bool:
-    host = _saved_host(saved_args)
-    return bool(host and not is_local_host(host) and saved_args.get("username") and saved_args.get("key"))
-
-
-def _needs_complete_remote_profile(saved_args: Mapping[str, Any]) -> bool:
-    host = _saved_host(saved_args)
-    if not host:
-        return True
-    if is_local_host(host):
-        return False
-    return not _has_complete_remote_profile(saved_args)
-
-
-def _saved_host(saved_args: Mapping[str, Any]) -> str:
-    host = str(saved_args.get("remote", ""))
-    if host:
-        return host
-    if str(saved_args.get("target", "")).strip().lower() == "local":
-        return "localhost"
-    return ""

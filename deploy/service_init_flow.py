@@ -100,7 +100,7 @@ class ServiceInitArgumentResolver:
             ResolvedArgument(
                 name="image",
                 value=image,
-                origin="cli/config/prompt (--image)",
+                origin="cli/prompt (--image)",
             ),
             ResolvedArgument(
                 name="ingress_networks",

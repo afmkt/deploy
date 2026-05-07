@@ -7,18 +7,15 @@ from typing import Any
 
 from rich.console import Console
 
-from .config import DeployConfig
 from .git import GitRepository
 from .remote import RemoteServer
 from .session import (
-    ALL_FALLBACK_SOURCES,
     ConnectionProfile,
     build_connection,
-    complete_connection_profile,
     connection_args,
-    load_connection_profile,
     load_defaulted_value,
     managed_connection,
+    resolve_connection_profile,
 )
 from .target import construct_repo_url
 from .utils import prompt_deploy_path
@@ -43,7 +40,7 @@ class PullResolutionResult:
 
 
 class PullArgumentResolver:
-    """Resolve pull arguments from CLI input, config fallback, and prompts."""
+    """Resolve pull arguments from CLI input and prompts."""
 
     def __init__(
         self,
@@ -51,31 +48,24 @@ class PullArgumentResolver:
         default_repo_path: str,
         default_deploy_path: str,
         interactive: bool,
-        use_config: bool,
     ):
         self.default_repo_path = default_repo_path
         self.default_deploy_path = default_deploy_path
         self.interactive = interactive
-        self.use_config = use_config
 
     def resolve(
         self,
-        config: DeployConfig,
         *,
         repo_path: str,
         deploy_path: str,
         profile: ConnectionProfile,
         branch: str | None,
     ) -> PullResolutionResult | None:
-        profile_result = load_connection_profile(
-            config,
-            "repo.pull",
-            profile,
-            use_config=self.use_config,
-            fallback_sources=ALL_FALLBACK_SOURCES,
-        )
+        resolved_profile = resolve_connection_profile(profile, interactive=self.interactive)
+        if resolved_profile is None:
+            return None
 
-        saved_args = profile_result.saved_args
+        saved_args: dict[str, Any] = {}
         resolved_repo_path = load_defaulted_value(repo_path, self.default_repo_path, saved_args, "repo_path")
         resolved_deploy_path = load_defaulted_value(
             deploy_path,
@@ -83,9 +73,6 @@ class PullArgumentResolver:
             saved_args,
             "path",
         )
-        completed_profile = complete_connection_profile(profile_result.profile, self.interactive)
-        if completed_profile is None:
-            return None
 
         if self.interactive and resolved_deploy_path == self.default_deploy_path:
             resolved_deploy_path = prompt_deploy_path()
@@ -94,10 +81,10 @@ class PullArgumentResolver:
             context=PullExecutionContext(
                 repo_path=resolved_repo_path,
                 deploy_path=resolved_deploy_path,
-                profile=completed_profile,
+                profile=resolved_profile,
                 branch=branch,
             ),
-            used_saved_args=profile_result.used_saved_args,
+            used_saved_args=False,
         )
 
 
@@ -152,13 +139,3 @@ def execute_pull(context: PullExecutionContext, console: Console) -> bool:
             return True
     except ConnectionError:
         return False
-
-
-def persist_pull_resolution(config: DeployConfig, context: PullExecutionContext) -> dict[str, Any]:
-    """Save resolved pull arguments for later runs."""
-    args_to_save: dict[str, Any] = {
-        "path": context.deploy_path,
-    }
-    args_to_save.update(connection_args(context.profile))
-    config.save_args(args_to_save, "repo.pull")
-    return args_to_save

@@ -7,12 +7,10 @@ from typing import Any
 
 from rich.console import Console
 
-from .config import DeployConfig
 from .docker import DockerManager, _safe_image_filename
 from .session import (
     ConnectionProfile,
     build_connection,
-    connection_args_from_connection,
     managed_connection,
     resolve_connection_profile,
 )
@@ -42,15 +40,13 @@ class ImagePushResolutionResult:
 
 
 class ImagePushArgumentResolver:
-    """Resolve image-push arguments from CLI input and config fallback."""
+    """Resolve image-push arguments from CLI input and prompts."""
 
-    def __init__(self, *, interactive: bool, use_config: bool):
+    def __init__(self, *, interactive: bool):
         self.interactive = interactive
-        self.use_config = use_config
 
     def resolve(
         self,
-        config: DeployConfig,
         *,
         image: str,
         profile: ConnectionProfile,
@@ -58,12 +54,7 @@ class ImagePushArgumentResolver:
         registry_username: str | None,
         registry_password: str | None,
     ) -> ImagePushResolutionResult | None:
-        completed_profile = resolve_connection_profile(
-            config,
-            "image.push",
-            profile,
-            use_config=self.use_config,
-        )
+        completed_profile = resolve_connection_profile(profile, interactive=self.interactive)
         if completed_profile is None:
             return None
 
@@ -76,7 +67,7 @@ class ImagePushArgumentResolver:
                 registry_password=registry_password,
                 interactive=self.interactive,
             ),
-            used_saved_args=self.use_config,
+            used_saved_args=False,
         )
 
 
@@ -114,14 +105,6 @@ def execute_image_push(
 
             console.print(f"\n[bold green]✓ Image '{context.image}' transferred to remote host[/bold green]")
             return True
-
     except Exception as e:
         console.print(f"[red]✗ Error during image push: {e}[/red]")
         return False
-
-
-def persist_image_push_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
-    """Save resolved image-push connection args for later runs."""
-    args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "image.push")
-    return args_to_save

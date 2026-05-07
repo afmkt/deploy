@@ -10,7 +10,6 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
-from .config import DeployConfig
 from .ingress import normalize_ingress_networks
 from .paths import REPOS_DIR
 from .push_flow import PushExecutionContext, execute_push
@@ -19,7 +18,6 @@ from .service import ServiceManager
 from .session import (
     ConnectionProfile,
     build_connection,
-    connection_args_from_connection,
     managed_connection,
     resolve_connection_profile,
 )
@@ -45,14 +43,10 @@ class ServiceDeployResolutionResult:
 
 
 class ServiceDeployArgumentResolver:
-    """Resolve service-deploy arguments from CLI input and config fallback."""
-
-    def __init__(self, *, use_config: bool):
-        self.use_config = use_config
+    """Resolve service-deploy arguments from CLI input."""
 
     def resolve(
         self,
-        config: DeployConfig,
         *,
         name: str | None,
         sync: bool,
@@ -60,9 +54,7 @@ class ServiceDeployArgumentResolver:
         refresh: bool = False,
         profile: ConnectionProfile,
     ) -> ServiceDeployResolutionResult | None:
-        completed_profile = resolve_connection_profile(
-            config, "svc.up", profile, use_config=self.use_config
-        )
+        completed_profile = resolve_connection_profile(profile, interactive=False)
         if completed_profile is None:
             return None
 
@@ -261,14 +253,6 @@ def print_service_status_block(
     if logs and logs.strip():
         console.print("\n[bold]Recent logs:[/bold]")
         console.print(logs.rstrip())
-
-
-def persist_service_deploy_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
-    """Save resolved service-deploy connection args for later runs."""
-    args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "svc.up")
-    return args_to_save
-
 
 # ---------------------------------------------------------------------------
 # Private helpers

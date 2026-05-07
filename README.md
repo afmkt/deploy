@@ -221,7 +221,7 @@ deploy svc init --name session-store --image session-store:latest
 
 This generates:
 
-- `.deploy/config.yml` - configuration file
+
 - `Dockerfile`
 - `docker-compose.yml`
 - `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance
@@ -385,18 +385,6 @@ deploy svc init --name <service> --domain <correct-host> --image <image_name:tag
 deploy svc up --name <service> --remote <host> --username <user> --key <ssh_key>
 ```
 
-## Configuration
-
-Saved config file:
-
-```text
-.deploy/config.yml
-```
-
-Notes:
-
-- CLI args override saved config values.
-- Passwords are not persisted.
 
 ## Command Reference
 

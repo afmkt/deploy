@@ -60,12 +60,12 @@ Global options:
 deploy repo push --remote <host> --port 22 --username <user> --key <ssh_key> --path ~/.deploy/repos
 ```
 After the command we will have
-- `~/.deploy/repos` is the default remote path, can be overriden by CLI argument or config.yml
+- `~/.deploy/repos` is the default remote path
 - A bare Git repository at `~/.deploy/repos/<repo-name>.git`
 - A work directory of the repo at `~/.deploy/repos/<repo-name>.work`
   The branch of the remote work dir matches the local work dir
   The revision of the remote work dir matches the local work dir
-- A configuration file in the local repo work directory `.deploy/config.yml`
+
 
 Use saved config on later runs:
 
@@ -130,7 +130,7 @@ Commands:
 deploy proxy up --remote <host> --username <user> --key <ssh_key> --network <name> --network <name1> ... --bootstrap
 ```
 After the command we will have
-- local configuration file config.yml
+
 - `~/.deploy/repos/docker-caddy-proxy.service/docker-compose.yml`, this is the compose file to launch the proxy
 - `~/.deploy/repos/docker-caddy-proxy.service/Caddyfile`, this is the configuration for the proxy
 
@@ -196,7 +196,7 @@ Useful options:
 Example with isolated app network:
 
 This command generates:
-- `.deploy/config.yml` - configuration file
+
 - `Dockerfile`
 - `docker-compose.yml`
 - `.github/skills/deploy-service/SKILL.md` — generated service-specific operating guidance

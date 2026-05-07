@@ -41,9 +41,6 @@ deploy proxy up \
   --key ~/.ssh/id_ed25519
 ```
 
-On the first run this saves the connection to `.deploy/config.yml`. All
-subsequent commands can use `--use-config` (which is the default for `proxy`
-subcommands) to skip repeating the flags.
 
 **Verify the proxy is running:**
 

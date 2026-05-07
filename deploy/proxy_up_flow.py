@@ -8,13 +8,11 @@ from typing import Any, Sequence
 from rich.console import Console
 from rich.panel import Panel
 
-from .config import DeployConfig
 from .proxy import PROXY_IMAGE, ProxyManager
 from .service import ServiceManager
 from .session import (
     ConnectionProfile,
     build_connection,
-    connection_args_from_connection,
     managed_connection,
     resolve_connection_profile,
 )
@@ -40,23 +38,19 @@ class ProxyUpResolutionResult:
 
 
 class ProxyUpArgumentResolver:
-    """Resolve proxy-up arguments from CLI input and config fallback."""
+    """Resolve proxy-up arguments from CLI input and prompts."""
 
-    def __init__(self, *, use_config: bool):
-        self.use_config = use_config
+    def __init__(self, *, interactive: bool):
+        self.interactive = interactive
 
     def resolve(
         self,
-        config: DeployConfig,
         *,
         profile: ConnectionProfile,
         ingress_networks: Sequence[str],
         migrate_native_caddy: bool,
-        interactive: bool,
     ) -> ProxyUpResolutionResult | None:
-        completed_profile = resolve_connection_profile(
-            config, "proxy.up", profile, use_config=self.use_config
-        )
+        completed_profile = resolve_connection_profile(profile, interactive=self.interactive)
         if completed_profile is None:
             return None
 
@@ -65,7 +59,7 @@ class ProxyUpArgumentResolver:
                 profile=completed_profile,
                 networks=tuple(normalize_ingress_networks(ingress_networks)),
                 migrate_native_caddy=migrate_native_caddy,
-                interactive=interactive,
+                interactive=self.interactive,
             )
         )
 
@@ -204,10 +198,3 @@ def execute_proxy_up(context: ProxyUpExecutionContext, console: Console, image_p
             return True, ssh
     except ConnectionError:
         return False, None
-
-
-def persist_proxy_up_resolution(config: DeployConfig, connection: Any) -> dict[str, Any]:
-    """Save resolved proxy-up connection args for later runs."""
-    args_to_save = connection_args_from_connection(connection)
-    config.save_args(args_to_save, "proxy.up")
-    return args_to_save

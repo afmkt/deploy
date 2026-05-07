@@ -4,7 +4,7 @@ import json
 import shlex
 import textwrap
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
 
 _SKILL_TEMPLATE_PATH = Path(__file__).parent / "templates" / "client-skills.md"
@@ -380,6 +380,34 @@ class ServiceManager:
 
 
 
+
+    def read_service_metadata(self, service_name: str) -> dict[str, Any] | None:
+        """Read service metadata from .deploy-service.json."""
+        service_dir = self._service_dir(service_name)
+        metadata_file = f"{service_dir}/.deploy-service.json"
+        exit_code, stdout, stderr = self.ssh.execute(f"cat {self._q(metadata_file)}")
+        if exit_code != 0:
+            return None
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError:
+            return None
+
+    def upload_metadata(self, service_name: str, metadata_content: str) -> bool:
+        """Upload service metadata to .deploy-service.json."""
+        service_dir = self._service_dir(service_name)
+        metadata_file = f"{service_dir}/.deploy-service.json"
+        write_cmd = (
+            f"cat > {self._q(metadata_file)} << 'ENDOFMETADATA'\n"
+            f"{metadata_content}\n"
+            "ENDOFMETADATA"
+        )
+        exit_code, _, stderr = self.ssh.execute(write_cmd)
+        if exit_code != 0:
+            console.print(f"[red]✗ Failed to upload metadata: {stderr.strip()}[/red]")
+            return False
+        console.print(f"[green]✓ Metadata uploaded to {metadata_file}[/green]")
+        return True
 
     @staticmethod
     def _read_optional_metadata_str(metadata: dict, key: str) -> Optional[str]:

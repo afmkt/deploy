@@ -9,9 +9,8 @@ deploy --non-interactive <group> <command> [...options]
 ```
 
 - `--non-interactive`: Disable prompts and fail when required values cannot be resolved from CLI or config.
-- Configuration is stored in `.deploy/config.yml`.
+
 - Configuration uses nested sections such as `repo.push`, `image.push`, `proxy.up`, and `svc.init`.
-- Unknown keys in `.deploy/config.yml` are treated as errors.
 - Path-like config values such as `key` and `path` expand `~` on load.
 
 ## Repository Commands
@@ -26,7 +25,6 @@ Useful options:
 - `--remote`: Target host. Use `localhost` to run locally.
 - `--path`: Remote deploy base path. Defaults to `~/.deploy/repos`.
 - `--repo-path`: Local repository path. Defaults to `.`.
-- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
 Saved config section:
 - `repo.push`
@@ -42,7 +40,6 @@ Useful options:
 - `--path`: Remote deploy base path. Defaults to `~/.deploy/repos`.
 - `--repo-path`: Local repository path. Defaults to `.`.
 - `--branch`: Pull into a specific local branch.
-- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
 Saved config section:
 - `repo.pull`
@@ -59,7 +56,6 @@ Useful options:
 - `--platform`: Override target platform.
 - `--registry-username`: Registry username for private images.
 - `--registry-password`: Registry password for private images.
-- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
 Saved config section:
 - `image.push`
@@ -73,7 +69,6 @@ deploy image build --tag <image:tag> --remote <host> --username <user> --key <ss
 Useful options:
 - `--tag`: Tag to assign to the built image.
 - `--path`: Remote deploy path used for the repo sync step.
-- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
 Saved config section:
 - `image.build`
@@ -89,7 +84,6 @@ deploy proxy up --remote <host> --username <user> --key <ssh_key> --network ingr
 Useful options:
 - `--network`: Ingress network name. Repeat for multiple networks.
 - `--bootstrap/--no-bootstrap`: Enable or disable native Caddy bootstrap handoff.
-- `--use-config/--no-use-config`: Load saved values from `.deploy/config.yml`.
 
 Saved config section:
 - `proxy.up`

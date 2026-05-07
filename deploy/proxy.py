@@ -106,15 +106,56 @@ class ProxyManager:
 
     def __init__(self, ssh: SSHConnection):
         self.ssh = ssh
+        self._remote_home_cache: dict[str, str] = {}
 
     @property
     def is_local(self) -> bool:
         return bool(getattr(self.ssh, "is_local", False))
 
-    @staticmethod
-    def _q(value: str) -> str:
-        return shlex.quote(value)
+    def _remote_home(self, username: str) -> str:
+        """Get the home directory for a remote user.
+        
+        Uses standard home directory paths. For production use with non-standard
+        home directories, configure the remote path explicitly.
+        """
+        if username in self._remote_home_cache:
+            return self._remote_home_cache[username]
 
+        if username == "root":
+            home = "/root"
+        else:
+            home = f"/home/{username}"
+        self._remote_home_cache[username] = home
+        return home
+
+    def _expand_tilde(self, path: str) -> str:
+        """Expand ~ or ~user to the actual path on the remote system."""
+        if not path.startswith("~"):
+            return path
+
+        if path == "~" or path.startswith("~/"):
+            # Current user's home
+            username = getattr(self.ssh, "username", None) or "root"
+            home = self._remote_home(username)
+            if path == "~":
+                return home
+            return home + path[1:]
+
+        import re
+        match = re.match(r"~([^/]+)(.*)", path)
+        if match:
+            username, rest = match.groups()
+            home = self._remote_home(username)
+            return home + rest
+
+        return path
+
+    def _q(self, value: str) -> str:
+        import shlex
+        # Don't quote values starting with ~ so the remote shell can expand it
+        if value.startswith("~") and " " not in value and '"' not in value and "'" not in value:
+            return value
+        return shlex.quote(value)
     def _proxy_base_dir(self) -> str:
         """Return the base directory used for proxy runtime artifacts."""
         # If running locally, expand ~ for local file operations

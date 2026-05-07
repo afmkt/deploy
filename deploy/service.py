@@ -282,13 +282,53 @@ class ServiceManager:
 
     def __init__(self, ssh: SSHConnection, remote_base: str = REPOS_DIR):
         self.ssh = ssh
-        # For remote, pass ~ as-is so the shell expands it
         self.remote_base = remote_base
+        self._remote_home_cache: dict[str, str] = {}
 
-    @staticmethod
-    def _q(value: str) -> str:
+    def _remote_home(self, username: str) -> str:
+        """Get the home directory for a remote user.
+        
+        Uses standard home directory paths. For production use with non-standard
+        home directories, configure the remote path explicitly.
+        """
+        if username in self._remote_home_cache:
+            return self._remote_home_cache[username]
+
+        if username == "root":
+            home = "/root"
+        else:
+            home = f"/home/{username}"
+        self._remote_home_cache[username] = home
+        return home
+
+    def _expand_tilde(self, path: str) -> str:
+        """Expand ~ or ~user to the actual path on the remote system."""
+        if not path.startswith("~"):
+            return path
+
+        if path == "~" or path.startswith("~/"):
+            # Current user's home
+            username = getattr(self.ssh, "username", None) or "root"
+            home = self._remote_home(username)
+            if path == "~":
+                return home
+            return home + path[1:]
+
+        import re
+        match = re.match(r"~([^/]+)(.*)", path)
+        if match:
+            username, rest = match.groups()
+            home = self._remote_home(username)
+            return home + rest
+
+        return path
+
+    def _q(self, value: str) -> str:
+        import shlex
+        # Don't quote values starting with ~ so the remote shell can expand it
+        if value.startswith("~") and " " not in value and '"' not in value and "'" not in value:
+            return value
         return shlex.quote(value)
-
     def _service_dir(self, service_name: str) -> str:
         return get_service_dir_path(service_name, self.remote_base)
 

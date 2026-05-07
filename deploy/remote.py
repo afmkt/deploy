@@ -20,20 +20,42 @@ class RemoteServer:
             deploy_path: Base path for deployments on remote server
         """
         self.ssh = ssh
-        # For remote, pass ~ as-is so the shell expands it
         self.deploy_path = deploy_path
+        self._remote_home_cache: dict[str, str] = {}
 
     @property
     def is_local(self) -> bool:
         """Return True when operations target the current machine."""
         return bool(getattr(self.ssh, "is_local", False))
 
-    @staticmethod
-    def _q(value: str) -> str:
+    def _remote_home(self, username: str) -> str:
+        """Get the home directory for a remote user.
+        
+        Uses standard home directory paths. For production use with non-standard
+        home directories, configure the remote path explicitly.
+        """
+        if username in self._remote_home_cache:
+            return self._remote_home_cache[username]
+
+        # Use standard home directory paths
+        if username == "root":
+            home = "/root"
+        else:
+            home = f"/home/{username}"
+        self._remote_home_cache[username] = home
+        return home
+
+    def _expand_tilde(self, path: str) -> str:
+        """Return path as-is. ~ will be expanded by remote shell."""
+        return path
+
+    def _q(self, value: str) -> str:
         """Shell-quote dynamic values used in remote commands."""
-        import os
-        expanded = os.path.expanduser(value)
-        return shlex.quote(expanded)
+        # Don't quote values starting with ~ so the remote shell can expand it
+        if value.startswith("~") and " " not in value and "\"" not in value and "'" not in value:
+            return value
+        import shlex
+        return shlex.quote(value)
 
     def create_directory(self, path: str) -> bool:
         """Create directory on remote server.
@@ -240,6 +262,6 @@ class RemoteServer:
             bare_repo_url = bare_repo_path
         else:
             username = self.ssh.username or "root"
-            bare_repo_url = f"ssh://{username}@{self.ssh.host}:{self.ssh.port}{bare_repo_path}"
+            bare_repo_url = f"ssh://{username}@{self.ssh.host}:{self.ssh.port}/{bare_repo_path.lstrip('/')}"
 
         return True, bare_repo_url
